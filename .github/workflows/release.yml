@@ -85,7 +85,9 @@ jobs:
           fastlane pilot upload \
             --ipa build/Shuhu.ipa \
             --api_key_path /tmp/asc_key.json \
-            --skip_waiting_for_build_processing true \
+            --changelog "${{ github.event.inputs.changelog }}" \
+            --skip_waiting_for_build_processing false \
+            --wait_processing_timeout_duration 1800 \
             2>&1 | tee /tmp/upload.log | xcbeautify
 
       # TestFlight「测试内容」在构建处理完成后于 App Store Connect 网页粘贴（inputs.changelog）
