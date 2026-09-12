@@ -30,7 +30,10 @@
 - 同步：接入 backend 时以 [shared/](../shared/) 的契约为准（见 docs/adr/0003）。
 - ⚠️ 永远不要实现逾期/落后 UI（docs/adr/0002）。
 
-## TestFlight 发版（签名与上传已预埋）
+## TestFlight 发版
+
+> **发版操作、签名架构、排障速查见 [docs/RELEASE.md](docs/RELEASE.md)（权威手册，新 session 必读）。**
+> 发版唯一动作：Actions → Release (TestFlight) → Run workflow；绿了之后必须用 ASC REST 验证构建入库（手册有现成命令）。
 
 `ExportOptions.plist` + `.github/workflows/release.yml`（手动触发）已就绪。首次启用需要往
 GitHub 仓库 Settings → Secrets and variables → Actions 配置四枚 secret：
