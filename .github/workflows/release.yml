@@ -68,16 +68,25 @@ jobs:
             -authenticationKeyIssuerID "$ASC_KEY_ISSUER_ID" \
             | tee /tmp/export.log | xcbeautify
 
-      - name: Upload to TestFlight
+      - name: Upload to TestFlight (fastlane pilot)
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_KEY_ISSUER_ID: ${{ secrets.ASC_KEY_ISSUER_ID }}
+          ASC_KEY_P8_B64: ${{ secrets.ASC_KEY_P8_B64 }}
         run: |
-          xcrun altool --upload-app \
-            -f build/*.ipa \
-            -t ios \
-            --apiKey "$ASC_KEY_ID" \
-            --apiIssuer "$ASC_KEY_ISSUER_ID"
+          brew install fastlane
+          /tmp/ghven/bin/python 2>/dev/null || true
+          python3 - <<'PY'
+          import base64, json, os
+          key = base64.b64decode(os.environ["ASC_KEY_P8_B64"]).decode()
+          json.dump({"key_id": os.environ["ASC_KEY_ID"], "issuer_id": os.environ["ASC_KEY_ISSUER_ID"],
+                     "key": key, "in_house": False}, open("/tmp/asc_key.json", "w"))
+          PY
+          fastlane pilot upload \
+            --ipa build/Shuhu.ipa \
+            --api_key_path /tmp/asc_key.json \
+            --skip_waiting_for_build_processing true \
+            2>&1 | tee /tmp/upload.log | xcbeautify
 
       # TestFlight「测试内容」在构建处理完成后于 App Store Connect 网页粘贴（inputs.changelog）
 
@@ -85,7 +94,7 @@ jobs:
       - name: Surface failures
         if: failure()
         run: |
-          for f in /tmp/archive.log /tmp/export.log; do
+          for f in /tmp/archive.log /tmp/export.log /tmp/upload.log; do
             [ -f "$f" ] && grep -E "error:|fatal" "$f" | head -30 | while IFS= read -r line; do
               echo "::error::${line:0:400}"
             done
