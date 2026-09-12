@@ -33,7 +33,7 @@ jobs:
               with urllib.request.urlopen(req) as r:
                   return json.load(r)
 
-          apps = get("https://api.appstoreconnect.com/v1/apps?filter[bundleId]=ink.groovy.shuhu")
+          apps = get("https://api.appstoreconnect.apple.com/v1/apps?filter[bundleId]=ink.groovy.shuhu")
           if not apps["data"]:
               print("APP-RECORD: 不存在（App Store Connect 里还没建应用记录）")
               raise SystemExit(0)
@@ -41,7 +41,7 @@ jobs:
           print("APP:", app["id"], app["attributes"]["name"], app["attributes"]["bundleId"])
 
           builds = get(
-              "https://api.appstoreconnect.com/v1/builds"
+              "https://api.appstoreconnect.apple.com/v1/builds"
               f"?filter[app]={app['id']}&fields[builds]=version,processingState,uploadedDate"
               "&sort=-uploadedDate&limit=10")
           if not builds["data"]:
