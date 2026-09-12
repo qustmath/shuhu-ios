@@ -48,11 +48,14 @@ jobs:
       - name: Archive (manual signing)
         run: |
           set -euo pipefail
+          # 签名设置只作用于 App 目标：SPM 依赖目标（GRDB）不支持描述文件，
+          # 继承 Manual+Specifier 会被 Xcode 拒绝（"GRDB does not support provisioning profiles"）
           xcodebuild archive \
             -project Shuhu.xcodeproj \
             -scheme Shuhu \
             -configuration Release \
             -archivePath build/Shuhu.xcarchive \
+            -target Shuhu \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Apple Distribution" \
