@@ -48,19 +48,14 @@ jobs:
       - name: Archive (manual signing)
         run: |
           set -euo pipefail
-          # 签名设置只作用于 App 目标：SPM 依赖目标（GRDB）不支持描述文件，
-          # 继承 Manual+Specifier 会被 Xcode 拒绝（"GRDB does not support provisioning profiles"）
+          # 手动签名在 project.yml 的 Release 配置里表达（仅 Shuhu 目标）；
+          # SPM 依赖 GRDB 保持 Automatic（框架无描述文件概念），命令行不再覆盖
           xcodebuild archive \
             -project Shuhu.xcodeproj \
             -scheme Shuhu \
             -configuration Release \
             -archivePath build/Shuhu.xcarchive \
-            -target Shuhu \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            PROVISIONING_PROFILE_SPECIFIER="Shufu App Store" \
-            DEVELOPMENT_TEAM=RHXA5ZS73K \
             | tee /tmp/archive.log | xcbeautify
 
       - name: Export IPA
