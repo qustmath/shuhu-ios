@@ -15,7 +15,8 @@ jobs:
           ASC_KEY_P8_B64: ${{ secrets.ASC_KEY_P8_B64 }}
         run: |
           pip3 install --quiet pyjwt cryptography 2>/dev/null || pip3 install --quiet --break-system-packages pyjwt cryptography
-          python3 - <<'PY' | tee /tmp/builds.log
+          set -o pipefail
+          python3 - <<'PY' 2>&1 | tee /tmp/builds.log
           import base64, json, os, time, urllib.request
           import jwt
 
@@ -53,6 +54,6 @@ jobs:
       - name: Surface status
         if: always()
         run: |
-          grep -E "^(APP|BUILD|BUILDS)" /tmp/builds.log | head -20 | while IFS= read -r line; do
-            echo "::notice::${line:0:400}"
-          done
+          while IFS= read -r line; do
+            [ -n "$line" ] && echo "::notice::${line:0:400}"
+          done < /tmp/builds.log
