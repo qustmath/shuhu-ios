@@ -51,14 +51,14 @@ public final class GRDBLibraryRepository: LibraryRepository, Sendable {
     public func currentPage(bookId: Int64) async throws -> Int? {
         try await writer.read { db in
             let book = try BookRow.filter(Column("id") == bookId).fetchOne(db)
-            guard let round = book?.currentRound else { return nil }
+            guard let round = book?.current_round else { return nil }
             return try RecordRow
                 .filter(Column("book_id") == bookId)
                 .filter(sql: "deleted_at IS NULL")
                 .filter(Column("round") == round)
                 .order(Column("date").desc, Column("created_at").desc, Column("id").desc)
                 .fetchOne(db)?
-                .pageReached
+                .page_reached
         }
     }
 
