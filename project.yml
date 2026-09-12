@@ -16,9 +16,8 @@ settings:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
-    # Apple Developer Program 注册后填入真实 Team ID（$99/年），
-    # 与 docs/deploy.md「微信开放平台 iOS 参数」的 AASA 占位符同步替换
-    DEVELOPMENT_TEAM: ""
+    # Apple Developer Program Team ID（微信 iPhone 应用登记、签名、AASA 三方共用）
+    DEVELOPMENT_TEAM: RHXA5ZS73K
 
 targets:
   Shuhu:
