@@ -46,6 +46,9 @@ targets:
       - ShuhuTests
     dependencies:
       - target: Shuhu
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
 
 schemes:
   Shuhu:
