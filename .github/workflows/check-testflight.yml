@@ -1,6 +1,6 @@
 name: Check TestFlight
 
-# 手动触发：查询该 App 在 TestFlight 的全部构建与处理状态（结果以注解回读，无需认证）
+# 手动触发：直连 App Store Connect REST API 查构建处理状态（结果以注解回读，无需认证）
 on:
   workflow_dispatch:
 
@@ -8,26 +8,51 @@ jobs:
   check:
     runs-on: macos-15
     steps:
-      - name: Query builds
+      - name: Query builds via ASC REST API
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_KEY_ISSUER_ID: ${{ secrets.ASC_KEY_ISSUER_ID }}
           ASC_KEY_P8_B64: ${{ secrets.ASC_KEY_P8_B64 }}
         run: |
-          brew install fastlane
-          python3 - <<'PY'
-          import base64, json, os
-          key = base64.b64decode(os.environ["ASC_KEY_P8_B64"]).decode()
-          json.dump({"key_id": os.environ["ASC_KEY_ID"], "issuer_id": os.environ["ASC_KEY_ISSUER_ID"],
-                     "key": key, "in_house": False}, open("/tmp/asc_key.json", "w"))
-          PY
-          fastlane pilot builds --api_key_path /tmp/asc_key.json --app_identifier ink.groovy.shuhu 2>&1 | tee /tmp/builds.log || true
+          pip3 install --quiet pyjwt cryptography 2>/dev/null || pip3 install --quiet --break-system-packages pyjwt cryptography
+          python3 - <<'PY' | tee /tmp/builds.log
+          import base64, json, os, time, urllib.request
+          import jwt
 
-      - name: Surface build status
+          key = base64.b64decode(os.environ["ASC_KEY_P8_B64"]).decode()
+          now = int(time.time())
+          token = jwt.encode(
+              {"iss": os.environ["ASC_KEY_ISSUER_ID"], "iat": now, "exp": now + 1200,
+               "aud": "appstoreconnect-v1"},
+              key, algorithm="ES256", headers={"kid": os.environ["ASC_KEY_ID"]})
+          headers = {"Authorization": "Bearer " + token}
+
+          def get(url):
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req) as r:
+                  return json.load(r)
+
+          apps = get("https://api.appstoreconnect.com/v1/apps?filter[bundleId]=ink.groovy.shuhu")
+          if not apps["data"]:
+              print("APP-RECORD: 不存在（App Store Connect 里还没建应用记录）")
+              raise SystemExit(0)
+          app = apps["data"][0]
+          print("APP:", app["id"], app["attributes"]["name"], app["attributes"]["bundleId"])
+
+          builds = get(
+              "https://api.appstoreconnect.com/v1/builds"
+              f"?filter[app]={app['id']}&fields[builds]=version,processingState,uploadedDate"
+              "&sort=-uploadedDate&limit=10")
+          if not builds["data"]:
+              print("BUILDS: 上传的构建尚未进入处理队列（Apple 入库延迟，再等几分钟）")
+          for b in builds["data"]:
+              a = b["attributes"]
+              print(f"BUILD {a['version']} | {a['processingState']} | {a['uploadedDate']}")
+          PY
+
+      - name: Surface status
         if: always()
         run: |
-          # 提取构建状态行（版本号/状态/拒绝原因），逐条以 notice 注解回读
-          grep -E "^[0-9]+\.[0-9]+ |Processing|Ready|Failed|Rejected|Expired|Could not|does not|error" /tmp/builds.log | head -30 | while IFS= read -r line; do
-            echo "::notice::BUILD ${line:0:400}"
+          grep -E "^(APP|BUILD|BUILDS)" /tmp/builds.log | head -20 | while IFS= read -r line; do
+            echo "::notice::${line:0:400}"
           done
-          echo "::notice::RAW-TAIL $(tail -15 /tmp/builds.log | tr '\n' '|' | cut -c1-3000)"
