@@ -27,7 +27,16 @@ jobs:
             -scheme Shuhu \
             -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
             -quiet \
-            | xcbeautify
+            | tee /tmp/xcodebuild.log | xcbeautify
+
+      # 失败详情以注解形式输出（无需认证即可从 API 读取，开发机在 Ubuntu 上）
+      - name: Surface failures
+        if: failure()
+        run: |
+          grep -A 30 "Failing tests:" /tmp/xcodebuild.log || true
+          grep -E "error:|XCTAssert" /tmp/xcodebuild.log | head -60 | while IFS= read -r line; do
+            echo "::error::$line"
+          done
 
       - name: Build for device (unsigned, smoke)
         run: |
