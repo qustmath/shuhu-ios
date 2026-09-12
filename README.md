@@ -30,6 +30,27 @@
 - 同步：接入 backend 时以 [shared/](../shared/) 的契约为准（见 docs/adr/0003）。
 - ⚠️ 永远不要实现逾期/落后 UI（docs/adr/0002）。
 
+## TestFlight 发版（签名与上传已预埋）
+
+`ExportOptions.plist` + `.github/workflows/release.yml`（手动触发）已就绪。首次启用需要往
+GitHub 仓库 Settings → Secrets and variables → Actions 配置四枚 secret：
+
+| Secret | 取值 |
+|---|---|
+| `ASC_TEAM_ID` | Apple Developer Team ID（10 位，developer.apple.com/account 可查） |
+| `ASC_KEY_ID` | App Store Connect API Key 的 Key ID |
+| `ASC_KEY_ISSUER_ID` | 同一 Key 的 Issuer ID |
+| `ASC_KEY_P8_B64` | 下载的 `AuthKey_<KeyID>.p8` 的 base64（`cat AuthKey_xxx.p8 \| base64`） |
+
+API Key 在 App Store Connect → 用户和访问 → 集成 → App Store Connect API 生成
+（角色 Admin；.p8 只能下载一次）。配齐后 Actions 页选 **Release (TestFlight) → Run workflow**：
+archive（自动签名，API Key 现场管理证书/描述文件）→ 导出 IPA → altool 上传。
+`CURRENT_PROJECT_VERSION` 用 CI run number 自动递增，满足 TestFlight 每包版本号递增要求。
+
+TestFlight 包处理完成后（10-30 分钟）：内部测试需把测试员的 Apple ID 加入
+App Store Connect 用户，对方装 TestFlight App 接受邀请；外部测试需过 Beta App Review。
+构建 90 天过期需重传。
+
 ## 当前状态（首票：工程骨架 + 本地核心）
 
 - 领域层：Book / ReadingRecord / CalendarDay / ReadingPlan（含每日目标、日期校验、展示文案）

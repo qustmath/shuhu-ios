@@ -1,0 +1,93 @@
+name: Release (TestFlight)
+
+# 手动触发：发 TestFlight 内测包。前置（三枚 repo secrets 就位后才能成功）：
+#   ASC_KEY_ID      App Store Connect API Key 的 Key ID
+#   ASC_KEY_ISSUER_ID  同一 Key 的 Issuer ID
+#   ASC_KEY_P8_B64  下载的 AuthKey_<KeyID>.p8 的 base64（cat file.p8 | base64）
+#   ASC_TEAM_ID     Apple Developer Team ID（10 位）
+# 流程：archive（自动签名，-allowProvisioningUpdates 由 API Key 现场创建/取用
+# 描述文件与证书）→ 导出 IPA → altool 上传 → App Store Connect 处理后进 TestFlight。
+on:
+  workflow_dispatch:
+    inputs:
+      changelog:
+        description: 本包测试内容（TestFlight 展示给测试员）
+        required: false
+        default: ''
+
+jobs:
+  testflight:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Install App Store Connect API key
+        env:
+          ASC_KEY_P8_B64: ${{ secrets.ASC_KEY_P8_B64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$ASC_KEY_P8_B64" | base64 --decode > "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+
+      - name: Archive
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_ISSUER_ID: ${{ secrets.ASC_KEY_ISSUER_ID }}
+        run: |
+          xcodebuild archive \
+            -project Shuhu.xcodeproj \
+            -scheme Shuhu \
+            -configuration Release \
+            -archivePath build/Shuhu.xcarchive \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_KEY_ISSUER_ID" \
+            | tee /tmp/archive.log | xcbeautify
+
+      - name: Export IPA
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_ISSUER_ID: ${{ secrets.ASC_KEY_ISSUER_ID }}
+          ASC_TEAM_ID: ${{ secrets.ASC_TEAM_ID }}
+        run: |
+          sed "s/__TEAM_ID__/$ASC_TEAM_ID/" ExportOptions.plist > /tmp/ExportOptions.plist
+          xcodebuild -exportArchive \
+            -archivePath build/Shuhu.xcarchive \
+            -exportOptionsPlist /tmp/ExportOptions.plist \
+            -exportPath build \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_KEY_ISSUER_ID" \
+            | tee /tmp/export.log | xcbeautify
+
+      - name: Upload to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_ISSUER_ID: ${{ secrets.ASC_KEY_ISSUER_ID }}
+        run: |
+          xcrun altool --upload-app \
+            -f build/*.ipa \
+            -t ios \
+            --apiKey "$ASC_KEY_ID" \
+            --apiIssuer "$ASC_KEY_ISSUER_ID"
+
+      # TestFlight「测试内容」在构建处理完成后于 App Store Connect 网页粘贴（inputs.changelog）
+
+      # 失败详情以注解输出（开发机在 Ubuntu，无权限拉原始日志）
+      - name: Surface failures
+        if: failure()
+        run: |
+          for f in /tmp/archive.log /tmp/export.log; do
+            [ -f "$f" ] && grep -E "error:|fatal" "$f" | head -30 | while IFS= read -r line; do
+              echo "::error::${line:0:400}"
+            done
+          done
+          tail -30 /tmp/archive.log 2>/dev/null | while IFS= read -r line; do echo "::error::ARCH ${line:0:300}"; done

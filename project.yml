@@ -32,10 +32,8 @@ targets:
       base:
         # 与 Android 包名一致（微信开放平台 iPhone 应用登记值，勿改）
         PRODUCT_BUNDLE_IDENTIFIER: ink.groovy.shuhu
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: 书乎
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_FILE: Shuhu/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: NO
 
