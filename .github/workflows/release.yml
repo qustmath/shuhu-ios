@@ -15,9 +15,15 @@ on:
 
 jobs:
   testflight:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        run: |
+          ls /Applications | grep -i xcode
+          for X in /Applications/Xcode_26*.app; do sudo xcode-select -s "$X"; done
+          xcodebuild -version
 
       - name: Generate Xcode project
         run: |
