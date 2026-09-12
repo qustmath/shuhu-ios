@@ -1,0 +1,33 @@
+name: Check TestFlight
+
+# 手动触发：查询该 App 在 TestFlight 的全部构建与处理状态（结果以注解回读，无需认证）
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: macos-15
+    steps:
+      - name: Query builds
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_ISSUER_ID: ${{ secrets.ASC_KEY_ISSUER_ID }}
+          ASC_KEY_P8_B64: ${{ secrets.ASC_KEY_P8_B64 }}
+        run: |
+          brew install fastlane
+          python3 - <<'PY'
+          import base64, json, os
+          key = base64.b64decode(os.environ["ASC_KEY_P8_B64"]).decode()
+          json.dump({"key_id": os.environ["ASC_KEY_ID"], "issuer_id": os.environ["ASC_KEY_ISSUER_ID"],
+                     "key": key, "in_house": False}, open("/tmp/asc_key.json", "w"))
+          PY
+          fastlane pilot builds --api_key_path /tmp/asc_key.json 2>&1 | tee /tmp/builds.log || true
+
+      - name: Surface build status
+        if: always()
+        run: |
+          # 提取构建状态行（版本号/状态/拒绝原因），逐条以 notice 注解回读
+          grep -E "^[0-9]+\.[0-9]+.*|Processing|Ready|Failed|Rejected|Expired" /tmp/builds.log | head -30 | while IFS= read -r line; do
+            echo "::notice::BUILD ${line:0:400}"
+          done
+          echo "::notice::RAW-TAIL $(tail -15 /tmp/builds.log | tr '\n' '|' | cut -c1-3000)"
