@@ -1,12 +1,10 @@
 name: Release (TestFlight)
 
-# 手动触发：发 TestFlight 内测包。前置（三枚 repo secrets 就位后才能成功）：
-#   ASC_KEY_ID      App Store Connect API Key 的 Key ID
-#   ASC_KEY_ISSUER_ID  同一 Key 的 Issuer ID
-#   ASC_KEY_P8_B64  下载的 AuthKey_<KeyID>.p8 的 base64（cat file.p8 | base64）
-#   ASC_TEAM_ID     Apple Developer Team ID（10 位）
-# 流程：archive（自动签名，-allowProvisioningUpdates 由 API Key 现场创建/取用
-# 描述文件与证书）→ 导出 IPA → altool 上传 → App Store Connect 处理后进 TestFlight。
+# 手动触发：发 TestFlight 内测包。
+# 签名采用手动模式（CI 无 Apple 账号登录，自动签名不可靠——jjt-ios 同款结论）：
+# 证书 = 分发证书 p12（secret DIST_*），描述文件 = "Shufu App Store"（ASC API 预创建）。
+# Secrets：ASC_KEY_ID / ASC_KEY_ISSUER_ID / ASC_KEY_P8_B64（pilot 上传用），
+#          DIST_P12_B64 / DIST_P12_PASSWORD / DIST_PROFILE_B64（签名用）。
 on:
   workflow_dispatch:
     inputs:
@@ -26,47 +24,60 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
-      - name: Install App Store Connect API key
+      - name: Install signing assets (keychain + profile)
         env:
-          ASC_KEY_P8_B64: ${{ secrets.ASC_KEY_P8_B64 }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          DIST_P12_B64: ${{ secrets.DIST_P12_B64 }}
+          DIST_P12_PASSWORD: ${{ secrets.DIST_P12_PASSWORD }}
+          DIST_PROFILE_B64: ${{ secrets.DIST_PROFILE_B64 }}
         run: |
-          mkdir -p ~/.appstoreconnect/private_keys
-          echo "$ASC_KEY_P8_B64" | base64 --decode > "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          set -euo pipefail
+          security create-keychain -p ci-pass build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci-pass build.keychain
+          echo "$DIST_P12_B64" | base64 --decode > /tmp/dist.p12
+          security import /tmp/dist.p12 -k build.keychain -P "$DIST_P12_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci-pass build.keychain \
+            >/dev/null
+          PROFILE_UUID="48ba2855-56c5-45c0-8ddd-f8d4badf4f62"
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "$DIST_PROFILE_B64" | base64 --decode \
+            > "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+          security find-identity -v -p codesigning build.keychain
 
-      - name: Archive
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_KEY_ISSUER_ID: ${{ secrets.ASC_KEY_ISSUER_ID }}
+      - name: Archive (manual signing)
         run: |
+          set -euo pipefail
           xcodebuild archive \
             -project Shuhu.xcodeproj \
             -scheme Shuhu \
             -configuration Release \
             -archivePath build/Shuhu.xcarchive \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_KEY_ISSUER_ID" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="Shufu App Store" \
+            DEVELOPMENT_TEAM=RHXA5ZS73K \
             | tee /tmp/archive.log | xcbeautify
 
       - name: Export IPA
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_KEY_ISSUER_ID: ${{ secrets.ASC_KEY_ISSUER_ID }}
-          ASC_TEAM_ID: ${{ secrets.ASC_TEAM_ID }}
         run: |
-          sed "s/__TEAM_ID__/$ASC_TEAM_ID/" ExportOptions.plist > /tmp/ExportOptions.plist
+          set -euo pipefail
           xcodebuild -exportArchive \
             -archivePath build/Shuhu.xcarchive \
-            -exportOptionsPlist /tmp/ExportOptions.plist \
+            -exportOptionsPlist ExportOptions.plist \
             -exportPath build \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_KEY_ISSUER_ID" \
             | tee /tmp/export.log | xcbeautify
+          ls -la build/*.ipa
+
+      - name: Install App Store Connect API key
+        env:
+          ASC_KEY_P8_B64: ${{ secrets.ASC_KEY_P8_B64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$ASC_KEY_P8_B64" | base64 --decode > "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
 
       - name: Upload to TestFlight (fastlane pilot)
         env:
@@ -74,8 +85,9 @@ jobs:
           ASC_KEY_ISSUER_ID: ${{ secrets.ASC_KEY_ISSUER_ID }}
           ASC_KEY_P8_B64: ${{ secrets.ASC_KEY_P8_B64 }}
         run: |
+          set -euo pipefail
           brew install fastlane
-          /tmp/ghven/bin/python 2>/dev/null || true
+          test -f build/Shuhu.ipa
           python3 - <<'PY'
           import base64, json, os
           key = base64.b64decode(os.environ["ASC_KEY_P8_B64"]).decode()
@@ -86,18 +98,15 @@ jobs:
             --ipa build/Shuhu.ipa \
             --api_key_path /tmp/asc_key.json \
             --changelog "${{ github.event.inputs.changelog }}" \
-            --skip_waiting_for_build_processing false \
-            --wait_processing_timeout_duration 1800 \
-            2>&1 | tee /tmp/upload.log | xcbeautify
+            --skip_waiting_for_build_processing true \
+            2>&1 | tee /tmp/upload.log
 
-      # TestFlight「测试内容」在构建处理完成后于 App Store Connect 网页粘贴（inputs.changelog）
-
-      # 失败详情以注解输出（开发机在 Ubuntu，无权限拉原始日志）
+      # 失败详情以注解输出（开发机在 Ubuntu，原始日志需管理员权限下载）
       - name: Surface failures
         if: failure()
         run: |
           for f in /tmp/archive.log /tmp/export.log /tmp/upload.log; do
-            [ -f "$f" ] && grep -E "error:|fatal" "$f" | head -30 | while IFS= read -r line; do
+            [ -f "$f" ] && grep -E "error:|fatal|\[!\]" "$f" | head -30 | while IFS= read -r line; do
               echo "::error::${line:0:400}"
             done
           done
