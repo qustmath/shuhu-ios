@@ -1,0 +1,39 @@
+name: CI
+
+# Ubuntu 开发机无法运行 Xcode：编译与测试全部在 GitHub Actions 的 macOS runner 上进行。
+# 工作流：XcodeGen 生成工程 → xcodebuild 在 iOS 模拟器跑全量单测。
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    name: Build & Test (iOS Simulator)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Run tests
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Shuhu.xcodeproj \
+            -scheme Shuhu \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -quiet \
+            | xcbeautify
+
+      - name: Build for device (unsigned, smoke)
+        run: |
+          xcodebuild build \
+            -project Shuhu.xcodeproj \
+            -scheme Shuhu \
+            -destination 'generic/platform=iOS' \
+            -quiet \
+            CODE_SIGNING_ALLOWED=NO

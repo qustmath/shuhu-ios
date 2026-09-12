@@ -1,0 +1,61 @@
+name: Shuhu
+options:
+  bundleIdPrefix: ink.groovy
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+
+# 依赖（SPM）：GRDB = SQLite 的 Swift 封装（迁移/事务/并发模型与 Android Room 同构）
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift
+    exactVersion: 6.29.3
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Apple Developer Program 注册后填入真实 Team ID（$99/年），
+    # 与 docs/deploy.md「微信开放平台 iOS 参数」的 AASA 占位符同步替换
+    DEVELOPMENT_TEAM: ""
+
+targets:
+  Shuhu:
+    type: application
+    platform: iOS
+    sources:
+      - Shuhu
+    dependencies:
+      - package: GRDB
+    settings:
+      base:
+        # 与 Android 包名一致（微信开放平台 iPhone 应用登记值，勿改）
+        PRODUCT_BUNDLE_IDENTIFIER: ink.groovy.shuhu
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: 书乎
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTS_MACCATALYST: NO
+
+  ShuhuTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - ShuhuTests
+    dependencies:
+      - target: Shuhu
+
+schemes:
+  Shuhu:
+    build:
+      targets:
+        Shuhu: all
+        ShuhuTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ShuhuTests

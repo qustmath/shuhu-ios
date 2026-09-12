@@ -3,3 +3,8 @@ xcuserdata/
 *.xcuserstate
 DerivedData/
 *.ipa
+
+# XcodeGen 生成产物（工程由 project.yml 派生，勿直接改、不入库）
+*.xcodeproj
+.build/
+Package.resolved
