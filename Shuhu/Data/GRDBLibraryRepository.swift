@@ -70,9 +70,9 @@ public final class GRDBLibraryRepository: LibraryRepository, Sendable {
             // 与 Android BookDao.maxSortOrder 同语义：全表取最大（含墓碑行）
             let maxOrder = try Int64.fetchOne(db, sql: "SELECT MAX(sort_order) FROM book") ?? 0
             var row = BookRow(draft: draft)
-            row.sortOrder = Int(maxOrder) + 1 // 新书排末尾
+            row.sort_order = Int(maxOrder) + 1 // 新书排末尾
             row.guid = UUID().uuidString
-            row.updatedAt = now
+            row.updated_at = now
             try row.insert(db)
             row.id = db.lastInsertedRowID
             return row.toDomain
@@ -83,7 +83,7 @@ public final class GRDBLibraryRepository: LibraryRepository, Sendable {
         let now = currentTimeMillis()
         try await writer.write { db in
             var row = BookRow(book: book)
-            row.updatedAt = now
+            row.updated_at = now
             try row.update(db)
         }
     }
@@ -120,7 +120,7 @@ public final class GRDBLibraryRepository: LibraryRepository, Sendable {
         return try await writer.write { db in
             var row = RecordRow(draft: draft)
             row.guid = UUID().uuidString
-            row.updatedAt = now
+            row.updated_at = now
             try row.insert(db)
             row.id = db.lastInsertedRowID
             return row.toDomain
@@ -131,7 +131,7 @@ public final class GRDBLibraryRepository: LibraryRepository, Sendable {
         let now = currentTimeMillis()
         try await writer.write { db in
             var row = RecordRow(record: record)
-            row.updatedAt = now
+            row.updated_at = now
             try row.update(db)
         }
     }

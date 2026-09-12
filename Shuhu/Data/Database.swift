@@ -61,7 +61,7 @@ public enum Database {
         if let path {
             writer = try DatabasePool(path: path)
         } else {
-            writer = DatabaseQueue()
+            writer = try DatabaseQueue()
         }
         try migrator.migrate(writer)
         return writer
