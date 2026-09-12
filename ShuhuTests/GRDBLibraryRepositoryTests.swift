@@ -92,7 +92,8 @@ final class GRDBLibraryRepositoryTests: XCTestCase {
         let tombstones = try await repository.tombstonedBooks()
         XCTAssertEqual(tombstones.count, 1, "墓碑保留（同步传播用）")
         XCTAssertNotNil(tombstones.first?.deletedAt)
-        XCTAssertGreaterThan(tombstones.first!.updatedAt, book.updatedAt, "墓碑行刷新 updatedAt")
+        // 同毫秒写入时两值相等：语义是「单调不减」（LWW 比较依据），不强制严格递增
+        XCTAssertGreaterThanOrEqual(tombstones.first!.updatedAt, book.updatedAt, "墓碑行刷新 updatedAt")
         let recordTombstones = try await repository.tombstonedRecords()
         XCTAssertEqual(recordTombstones.count, 1, "记录墓碑级联")
     }
