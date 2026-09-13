@@ -8,3 +8,8 @@ DerivedData/
 *.xcodeproj
 .build/
 Package.resolved
+
+# 本机工具产物（不入库）
+.mimosa/
+.codegraph/
+hs_err_pid*.log
