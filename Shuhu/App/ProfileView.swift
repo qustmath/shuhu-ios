@@ -53,6 +53,11 @@ struct ProfileView: View {
                 legalRow("用户协议", urlString: LegalPages.terms)
                 legalRow("隐私政策", urlString: LegalPages.privacy)
             }
+            Section {
+                Text("所有数据仅保存在这台设备上；登录后可云同步")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)

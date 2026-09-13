@@ -8,7 +8,7 @@
 |---|---|
 | Bundle ID | `ink.groovy.shuhu`（与 Android 包名一致） |
 | Universal Links | `https://rrapi.groovy.ink/app/`（AASA 已上线，见根仓库 docs/deploy.md） |
-| Apple Team ID | **待注册** Apple Developer Program 后填入 `project.yml` 的 `DEVELOPMENT_TEAM`，并替换 AASA 占位符 |
+| Apple Team ID | `RHXA5ZS73K`（已填入 `project.yml` 的 `DEVELOPMENT_TEAM`，AASA 已替换） |
 
 ## 工程形态（Linux 开发 + GitHub Actions 构建）
 
@@ -21,13 +21,15 @@
 
 - 领域层（`Shuhu/Domain/`）**只用 Foundation**，逐文件镜像 Android 端
   `android/app/src/main/java/com/shufou/domain/` 的模型与纯函数，测试用例一一对应
-  （`ReadingPlanTests` 镜像 `ReadingPlanTest`）。
+  （`ReadingPlanTests` 镜像 `ReadingPlanTest`、`ReadingRulesTests` 镜像 `ReadingRulesTest`）。
 - 持久化用 **GRDB（SQLite）**，表结构与 Android Room **v8 最终形态同构**
   （`guid`/`updated_at`/`deleted_at` 同步三件套 + guid 唯一索引），为 ADR-0007 客户端主从同步直接铺路。
   —— 这是相对于早期占位计划（SwiftData）的决策变更，理由见 ADR-0010：同步需要真实的
   SQLite 控制（墓碑批量更新、按 guid 的 LWW upsert、索引），GRDB 的迁移器也与 Room 语义同构。
-- 存储接缝对应 Android 的 `LibraryRepository`（协议命名一致：Book / ReadingRecord / Remark / Round）。
-- 同步：接入 backend 时以 [shared/](../shared/) 的契约为准（见 docs/adr/0003）。
+- 存储接缝对应 Android 的 `LibraryRepository`（协议命名一致：Book / ReadingRecord / Remark / Round），
+  应用层持有 `SyncAwareLibraryRepository` 装饰器（写路径登记待推并防抖同步）。
+- 同步：以 [shared/](../shared/) 契约为准（ADR-0007/0003）；引擎、账号切换裁决、封面自愈均镜像 Android
+  `data/sync/SyncEngine.kt`（测试桩用 URLProtocol）。
 - ⚠️ 永远不要实现逾期/落后 UI（docs/adr/0002）。
 
 ## TestFlight 发版
@@ -35,35 +37,26 @@
 > **发版操作、签名架构、排障速查见 [docs/RELEASE.md](docs/RELEASE.md)（权威手册，新 session 必读）。**
 > 发版唯一动作：Actions → Release (TestFlight) → Run workflow；绿了之后必须用 ASC REST 验证构建入库（手册有现成命令）。
 
-`ExportOptions.plist` + `.github/workflows/release.yml`（手动触发）已就绪。首次启用需要往
-GitHub 仓库 Settings → Secrets and variables → Actions 配置四枚 secret：
-
-| Secret | 取值 |
-|---|---|
-| `ASC_TEAM_ID` | Apple Developer Team ID（10 位，developer.apple.com/account 可查） |
-| `ASC_KEY_ID` | App Store Connect API Key 的 Key ID |
-| `ASC_KEY_ISSUER_ID` | 同一 Key 的 Issuer ID |
-| `ASC_KEY_P8_B64` | 下载的 `AuthKey_<KeyID>.p8` 的 base64（`cat AuthKey_xxx.p8 \| base64`） |
-
-API Key 在 App Store Connect → 用户和访问 → 集成 → App Store Connect API 生成
-（角色 Admin；.p8 只能下载一次）。配齐后 Actions 页选 **Release (TestFlight) → Run workflow**：
-archive（自动签名，API Key 现场管理证书/描述文件）→ 导出 IPA → altool 上传。
-`CURRENT_PROJECT_VERSION` 用 CI run number 自动递增，满足 TestFlight 每包版本号递增要求。
+签名走**手动模式**：分发证书 p12 与描述文件持久化在仓库 Secrets（`DIST_P12_B64`/`DIST_P12_PASSWORD`/`DIST_PROFILE_B64`），
+ASC API Key Secrets（`ASC_KEY_*`/`ASC_TEAM_ID`）用于上传。构建号 = GitHub run_number 自动递增。
 
 TestFlight 包处理完成后（10-30 分钟）：内部测试需把测试员的 Apple ID 加入
 App Store Connect 用户，对方装 TestFlight App 接受邀请；外部测试需过 Beta App Review。
 构建 90 天过期需重传。
 
-## 当前状态（首票：工程骨架 + 本地核心）
+## 当前状态（本地功能追平 Android + 同步全链路）
 
-- 领域层：Book / ReadingRecord / CalendarDay / ReadingPlan（含每日目标、日期校验、展示文案）
-- 持久化：GRDB 迁移 v1（Android v8 同构）+ `GRDBLibraryRepository`（软删级联/排序/当前页）
-- UI（最小可用）：书架列表（进度 + 今日目标）→ 添加书籍（含计划与校验）→ 详情（记录时间线 + 记一笔/删记录）
-- 测试：计划计算逐条镜像 Android 用例 + 仓库写语义 + CalendarDay 跨天/解析
+- 领域层：Book / ReadingRecord / CalendarDay / ReadingPlan / **ReadingRules（轮次与校验）** / **ReadingStats**
+- 持久化：GRDB 迁移 v1（Android v8 同构）+ `GRDBLibraryRepository`
+  （软删级联/排序/当前页/**封面文件存取/新记录归轮/applyRemote LWW/物理清空**）
+- UI：书架（封面 + 在读/已读完分区 + 轮次标记）→ 表单（新增/编辑 + 封面相册/拍照/更换/移除）→
+  详情（重读 + 分轮记录 + 记录编辑）→ 我页（统计 + 登录/注册/立即同步/换账号裁决/协议入口）
+- 同步：**SyncEngine 全链路**（首登静默合并、游标分页拉取、防抖推送、401 续期、封面本地文件→服务端引用自愈、
+  换账号「并入/清空」裁决）；契约 `shared/sync-api-v1.yaml`
+- 测试：镜像 Android 用例 + URLProtocol 网络桩（引擎分支矩阵、401 续期重试、换账号挂起）
 
 ## 下一步（候选票）
 
-1. 封面（文件存储 + 选图）与重读（round +1）UI。
-2. 同步引擎对齐 ADR-0007（游标/防抖/LWW，契约 `shared/sync-api-v1.yaml`）。
-3. 微信登录（OpenSDK iOS，等开放平台审核与 Team ID；Universal Links 接缝已定）。
-4. 签名与分发：注册 Apple Developer 后补 `DEVELOPMENT_TEAM`、证书/描述文件进 CI（match 或 secrets）。
+1. 微信登录（OpenSDK iOS，等开放平台移动应用审核；Universal Links 接缝已定）。
+2. 手机号换绑/未登录重置密码（Android 已有，iOS 待镜像）。
+3. 记录拖动排序、首页广告位等 Android 后续能力对齐（视产品需要）。
