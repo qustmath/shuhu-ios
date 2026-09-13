@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// 书籍详情（对齐 Android `BookDetailScreen` 布局）：
-/// 头部（封面+书名+作者+轮次）→ 进度卡（大页码数字+粗进度条）→ 记一笔/重读 →
+/// 头部（封面+书名+作者+轮次）→ 进度卡（渐变底卡片：大页码+圆环进度）→ 记一笔/重读 →
 /// 计划卡（起止日期+今日目标）→ 记录时间线（分轮展示，可编辑/左滑删除）。
 /// 记录为「读到的累计页码」；可补记过去的日子。
 /// 已读完的书隐藏「记一笔」（页码合法区间为空），以「重读」替代：currentRound+1，进度归零，历史保留。
@@ -122,54 +122,61 @@ struct BookDetailView: View {
         }
     }
 
-    // ---- 进度卡：大页码数字 + 粗进度条（Android ProgressCard）----
+    // ---- 进度卡：渐变底卡片 + 大数字 + 圆环进度 ----
 
     private func progressSection(_ book: Book) -> some View {
-        Section {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text("\(currentPage)")
-                        .font(.system(size: 44, weight: .bold))
-                        .foregroundStyle(.blue)
-                    Text(" / \(book.totalPages) 页")
-                        .font(.title3.bold())
-                        .foregroundStyle(.secondary)
+        let ratio = ReadingRules.progressPercent(currentPage: currentPage, totalPages: book.totalPages)
+        return Section {
+            HStack(spacing: 20) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text("\(currentPage)")
+                            .font(.system(size: 46, weight: .heavy, design: .rounded))
+                            .foregroundStyle(.blue)
+                            .contentTransition(.numericText())
+                        Text("/ \(book.totalPages) 页")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(isFinished ? "已读完，可开新一轮重读" : "已读 \(Int((ratio * 100).rounded()))%")
+                        .font(.caption)
+                        .foregroundStyle(isFinished ? .blue : .secondary)
                 }
-                progressBar(book)
+                Spacer()
+                progressRing(ratio)
             }
-            .padding(.vertical, 6)
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.blue.opacity(0.10), Color.blue.opacity(0.03)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing,
+                        ),
+                    ),
+            )
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
         }
     }
 
-    /// 进度条：细圆角条；进度 >15% 时白字百分比在条内，否则灰字在右侧。
-    private func progressBar(_ book: Book) -> some View {
-        let ratio = ReadingRules.progressPercent(currentPage: currentPage, totalPages: book.totalPages)
-        let percentText = "\(Int((ratio * 100).rounded()))%"
-        return GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.accentColor.opacity(0.15))
-                Capsule()
-                    .fill(Color.accentColor)
-                    .frame(width: max(proxy.size.width * ratio, ratio > 0 ? 10 : 0))
-                    .overlay(alignment: .trailing) {
-                        if ratio > 0.15 {
-                            Text(percentText)
-                                .font(.caption)
-                                .foregroundStyle(.white)
-                                .padding(.trailing, 8)
-                        }
-                    }
-                if ratio <= 0.15 {
-                    Text(percentText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .padding(.trailing, 8)
-                }
-            }
+    /// 圆环进度：底环淡蓝、进度环圆角端点，中央百分比。
+    private func progressRing(_ ratio: Double) -> some View {
+        ZStack {
+            Circle()
+                .stroke(Color.blue.opacity(0.12), lineWidth: 8)
+            Circle()
+                .trim(from: 0, to: ratio)
+                .stroke(Color.blue, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            Text("\(Int((ratio * 100).rounded()))%")
+                .font(.system(.footnote, design: .rounded).bold())
+                .monospacedDigit()
         }
-        .frame(height: 10)
+        .frame(width: 64, height: 64)
+        .animation(.easeInOut(duration: 0.4), value: ratio)
     }
 
     // ---- 记一笔 / 重读 ----

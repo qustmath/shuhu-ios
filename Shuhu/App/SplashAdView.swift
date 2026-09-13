@@ -16,19 +16,21 @@ struct SplashAdView: View {
     private static let splashSeconds = 4
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            remoteImage
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture { handleTap() }
+        GeometryReader { proxy in
+            ZStack(alignment: .topTrailing) {
+                Color.black.ignoresSafeArea()
+                remoteImage
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { handleTap() }
+                // 跳过按钮：显式下移状态栏高度（子视图 ignoresSafeArea 会把 ZStack 撑成
+                // 全屏、安全区失效，因此不能用 overlay/默认安全区，必须手动加 inset）
+                skipButton
+                    .padding(.trailing, 16)
+                    .padding(.top, proxy.safeAreaInsets.top + 8)
+            }
         }
-        // 跳过按钮挂在安全区内顶部：不被状态栏压住（素材图仍全屏铺满）
-        .overlay(alignment: .topTrailing) {
-            skipButton
-                .padding(.trailing, 16)
-                .padding(.top, 8)
-        }
+        .ignoresSafeArea()
         .task {
             adsClient.reportImpressions(slot: AdSlots.splash, ids: [creative.id])
             while secondsLeft > 0 {
