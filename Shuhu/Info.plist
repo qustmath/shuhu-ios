@@ -23,6 +23,9 @@
 	<!-- 导出合规：仅使用 HTTPS 等标准加密，豁免年度申报（TestFlight/上架免答询） -->
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<!-- 拍摄书籍封面用（系统相机组件代取，无相册/相机权限的运行时请求） -->
+	<key>NSCameraUsageDescription</key>
+	<string>用于拍摄书籍封面</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

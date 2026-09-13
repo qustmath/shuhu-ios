@@ -22,6 +22,9 @@ public protocol LibraryRepository: Sendable {
     /// 某本书的记录，date 倒序、同日按 createdAt 倒序（与 Android 一致）。
     func records(bookId: Int64) async throws -> [ReadingRecord]
 
+    /// 全部书籍的全部记录（统计页汇总用），排序同 `records(bookId:)` 语义。
+    func allRecords() async throws -> [ReadingRecord]
+
     /// 当前页 = 当前轮次最新一条记录的 pageReached；无记录返回 nil。
     func currentPage(bookId: Int64) async throws -> Int?
 

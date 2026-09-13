@@ -65,6 +65,16 @@ public final class GRDBLibraryRepository: LibraryRepository, Sendable {
         }
     }
 
+    public func allRecords() async throws -> [ReadingRecord] {
+        try await writer.read { db in
+            try RecordRow
+                .filter(sql: "deleted_at IS NULL")
+                .order(Column("date").desc, Column("created_at").desc, Column("id").desc)
+                .fetchAll(db)
+                .map(\.toDomain)
+        }
+    }
+
     public func currentPage(bookId: Int64) async throws -> Int? {
         try await writer.read { db in
             let book = try BookRow.filter(Column("id") == bookId).fetchOne(db)
