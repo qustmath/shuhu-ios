@@ -5,6 +5,8 @@ import SwiftUI
 /// 多轮书显示「第 N 轮」标记；右上角进入「我」页。
 struct HomeView: View {
     private let repository: any LibraryRepository
+    private let auth: AuthRepository
+    private let sync: SyncController
 
     @State private var books: [Book] = []
     @State private var currentPages: [Int64: Int] = [:] // bookId → 当前页
@@ -12,8 +14,10 @@ struct HomeView: View {
     @State private var loadError: String?
     @SceneStorage("home.finishedExpanded") private var finishedExpanded = false
 
-    init(repository: any LibraryRepository) {
+    init(repository: any LibraryRepository, auth: AuthRepository, sync: SyncController) {
         self.repository = repository
+        self.auth = auth
+        self.sync = sync
     }
 
     private var readingBooks: [Book] {
@@ -61,7 +65,7 @@ struct HomeView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     NavigationLink {
-                        ProfileView(repository: repository)
+                        ProfileView(repository: repository, auth: auth, sync: sync)
                     } label: {
                         Image(systemName: "person.circle")
                     }

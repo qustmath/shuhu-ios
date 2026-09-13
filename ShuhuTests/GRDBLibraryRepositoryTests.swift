@@ -207,6 +207,99 @@ final class GRDBLibraryRepositoryTests: XCTestCase {
         XCTAssertFalse(exists, "删书级联删除封面文件，避免垃圾文件堆积")
     }
 
+    // ---- 同步引擎专用（guid 读取 / 远端 LWW 应用 / 物理清空）----
+
+    func testByGuid_readersIncludeTombstones() async throws {
+        let book = try await repository.addBook(draft())
+        let day = CalendarDay(year: 2026, month: 9, day: 12)
+        let record = try await repository.addRecord(NewRecord(bookId: book.id, date: day, pageReached: 10))
+
+        let bookByGuid = try await repository.bookByGuid(guid: book.guid)
+        XCTAssertEqual(bookByGuid?.id, book.id)
+
+        try await repository.deleteRecord(id: record.id)
+        let tombstoned = try await repository.recordByGuid(guid: record.guid)
+        XCTAssertNotNil(tombstoned?.deletedAt, "guid 读取含墓碑行（同步推送用）")
+    }
+
+    func testApplyRemoteBook_insertNew_appliesNewer_ignoresOlderAndMissingTombstone() async throws {
+        // 本地无行 + 远端墓碑 → 忽略（无需落一行墓碑）
+        let remoteTombstone = Book(title: "云删除", author: "", totalPages: 10, guid: "g-tomb", updatedAt: 100, deletedAt: 100)
+        let appliedTombstone = try await repository.applyRemoteBook(remoteTombstone)
+        XCTAssertFalse(appliedTombstone)
+
+        // 本地无行 + 远端活行 → 插入，guid/updatedAt/sortOrder 原样
+        let remote = Book(
+            title: "云端书", author: "作者", totalPages: 300,
+            currentRound: 2, coverImagePath: nil, sortOrder: 5,
+            guid: "g-1", updatedAt: 2_000,
+        )
+        let applied = try await repository.applyRemoteBook(remote)
+        XCTAssertTrue(applied)
+        let local = try await repository.bookByGuid(guid: "g-1")
+        XCTAssertEqual(local?.title, "云端书")
+        XCTAssertEqual(local?.updatedAt, 2_000, "updatedAt 原样应用（LWW 依据）")
+        XCTAssertEqual(local?.currentRound, 2)
+        XCTAssertEqual(local?.sortOrder, 5)
+
+        // 本地较新 → 忽略
+        let older = Book(title: "旧改名", author: "", totalPages: 300, guid: "g-1", updatedAt: 1_000)
+        let appliedOlder = try await repository.applyRemoteBook(older)
+        XCTAssertFalse(appliedOlder)
+        let unchanged = try await repository.bookByGuid(guid: "g-1")
+        XCTAssertEqual(unchanged?.title, "云端书")
+
+        // 本地较旧 → 覆盖整行；远端无封面时保留本地封面路径
+        var withCover = local!
+        withCover.coverImagePath = "/covers/local.jpg"
+        try await repository.updateBook(withCover) // updatedAt 推进到「现在」
+        let newerRemote = Book(title: "云改名", author: "", totalPages: 300, guid: "g-1", updatedAt: withCover.updatedAt + 60_000)
+        let appliedNewer = try await repository.applyRemoteBook(newerRemote)
+        XCTAssertTrue(appliedNewer)
+        let merged = try await repository.bookByGuid(guid: "g-1")
+        XCTAssertEqual(merged?.title, "云改名")
+        XCTAssertEqual(merged?.coverImagePath, "/covers/local.jpg", "远端无封面 → 保留本地封面路径（票 09 前妥协）")
+    }
+
+    func testApplyRemoteRecord_insertNewAndIgnoreOlder() async throws {
+        let book = try await repository.addBook(draft())
+        let remote = ReadingRecord(bookId: book.id, date: CalendarDay(year: 2026, month: 9, day: 12), pageReached: 42, round: 1, guid: "r-1", updatedAt: 2_000)
+        let applied = try await repository.applyRemoteRecord(remote)
+        XCTAssertTrue(applied)
+        let local = try await repository.recordByGuid(guid: "r-1")
+        XCTAssertEqual(local?.pageReached, 42)
+
+        let older = ReadingRecord(bookId: book.id, date: CalendarDay(year: 2026, month: 9, day: 12), pageReached: 10, round: 1, guid: "r-1", updatedAt: 1_000)
+        let appliedOlder = try await repository.applyRemoteRecord(older)
+        XCTAssertFalse(appliedOlder)
+        let unchanged = try await repository.recordByGuid(guid: "r-1")
+        XCTAssertEqual(unchanged?.pageReached, 42, "本地较新 → 忽略远端旧行")
+    }
+
+    func testClearAllLibrary_physicallyRemovesEverything() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("shufu-clear-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repo = GRDBLibraryRepository(writer: try Database.open(), coversDirectory: dir)
+
+        let coverPath = try await repo.saveCoverImage(bytes: Data([0x89]), fileExtension: "jpg")
+        let book = try await repo.addBook(
+            NewBook(title: "书", author: "", totalPages: 10, coverImagePath: coverPath),
+        )
+        let record = try await repo.addRecord(NewRecord(bookId: book.id, date: CalendarDay(year: 2026, month: 9, day: 12), pageReached: 1))
+        try await repo.deleteRecord(id: record.id) // 制造墓碑行
+
+        try await repo.clearAllLibrary()
+
+        let books = try await repo.books()
+        XCTAssertTrue(books.isEmpty)
+        let bookTombstones = try await repo.tombstonedBooks()
+        XCTAssertTrue(bookTombstones.isEmpty, "物理清空含墓碑（不打新墓碑）")
+        let recordTombstones = try await repo.tombstonedRecords()
+        XCTAssertTrue(recordTombstones.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: coverPath), "封面文件一并清理")
+    }
+
     // ---- 迁移幂等 ----
 
     func testMigration_isIdempotent_onExistingDatabase() async throws {

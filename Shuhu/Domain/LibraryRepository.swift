@@ -1,3 +1,5 @@
+import Foundation
+
 /// 仓库操作错误。
 public enum LibraryRepositoryError: Error, Sendable {
     /// 目标书籍不存在（如已被删除）。
@@ -70,6 +72,34 @@ public protocol LibraryRepository: Sendable {
     func tombstonedBooks() async throws -> [Book]
 
     func tombstonedRecords() async throws -> [ReadingRecord]
+
+    // ---- 同步引擎专用（data-sync 票 07；UI 不应调用）----
+
+    /// 按 guid 读取书籍（含墓碑行；同步推送与冲突判定用）。
+    func bookByGuid(guid: String) async throws -> Book?
+
+    /// 按 guid 读取记录（含墓碑行）。
+    func recordByGuid(guid: String) async throws -> ReadingRecord?
+
+    /// 按 id 读取未删记录（装饰器登记变更用）。
+    func record(id: Int64) async throws -> ReadingRecord?
+
+    /// 原样应用远端书籍状态（LWW 下行）：guid/updatedAt/sortOrder/deletedAt 一律按远端值，
+    /// 不走用户写入语义（不重新分配 guid、不推进 updatedAt）。
+    /// 本地不存在且远端为墓碑 → 忽略；本地较新或相同 → 忽略；
+    /// 远端 coverImagePath 为 nil 时保留本地封面路径（封面一致性在票 09 完善）。
+    /// - Returns: true = 远端被实际应用（插入或覆盖）；false = 被忽略
+    @discardableResult
+    func applyRemoteBook(_ book: Book) async throws -> Bool
+
+    /// 原样应用远端记录状态，语义与返回值同 `applyRemoteBook`。
+    @discardableResult
+    func applyRemoteRecord(_ record: ReadingRecord) async throws -> Bool
+
+    /// 清空全部本地书籍与阅读记录（含墓碑，物理删除，封面文件一并清理）。
+    /// 专用于换账号「清空本地，以云端为准」：**不打墓碑**——墓碑会被推上云端误删云端数据，
+    /// 故必须绕开用户删除语义直连物理清空。仅同步引擎调用，UI 不得使用。
+    func clearAllLibrary() async throws
 }
 
 /// 添加书籍的表单草稿（无 id 与同步字段）。
