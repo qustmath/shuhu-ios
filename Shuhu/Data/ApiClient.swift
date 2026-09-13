@@ -15,7 +15,7 @@ public struct Envelope<Data: Decodable>: Decodable {
 }
 
 /// 无业务数据的响应体占位（登出等；data 为 null 或 {} 均可解）。
-public struct EmptyData: Decodable, Sendable {
+public struct EmptyData: Codable, Sendable {
     public init() {}
 }
 
