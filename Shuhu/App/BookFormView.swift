@@ -140,7 +140,7 @@ struct BookFormView: View {
         } else {
             ZStack {
                 Rectangle()
-                    .fill(Color.purple.opacity(0.12))
+                    .fill(Color.blue.opacity(0.10))
                 Text("无封面")
                     .font(.footnote)
                     .foregroundStyle(.secondary)

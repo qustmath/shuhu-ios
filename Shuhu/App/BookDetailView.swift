@@ -113,7 +113,7 @@ struct BookDetailView: View {
                         if multiRound {
                             Text("第 \(book.currentRound) 轮")
                                 .font(.footnote)
-                                .foregroundStyle(.purple)
+                                .foregroundStyle(.blue)
                         }
                     }
                 }
@@ -129,10 +129,11 @@ struct BookDetailView: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline, spacing: 2) {
                     Text("\(currentPage)")
-                        .font(.system(size: 30, weight: .bold))
-                        .foregroundStyle(.purple)
+                        .font(.system(size: 44, weight: .bold))
+                        .foregroundStyle(.blue)
                     Text(" / \(book.totalPages) 页")
-                        .font(.title2.bold())
+                        .font(.title3.bold())
+                        .foregroundStyle(.secondary)
                 }
                 progressBar(book)
             }
@@ -140,17 +141,17 @@ struct BookDetailView: View {
         }
     }
 
-    /// 粗进度条：高 22 圆角胶囊；进度 >15% 时白字百分比在条内，否则灰字在右侧（Android 同规则）。
+    /// 进度条：细圆角条；进度 >15% 时白字百分比在条内，否则灰字在右侧。
     private func progressBar(_ book: Book) -> some View {
         let ratio = ReadingRules.progressPercent(currentPage: currentPage, totalPages: book.totalPages)
         let percentText = "\(Int((ratio * 100).rounded()))%"
         return GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(Color.purple.opacity(0.12))
+                    .fill(Color.accentColor.opacity(0.15))
                 Capsule()
-                    .fill(Color.purple)
-                    .frame(width: max(proxy.size.width * ratio, ratio > 0 ? 22 : 0))
+                    .fill(Color.accentColor)
+                    .frame(width: max(proxy.size.width * ratio, ratio > 0 ? 10 : 0))
                     .overlay(alignment: .trailing) {
                         if ratio > 0.15 {
                             Text(percentText)
@@ -168,7 +169,7 @@ struct BookDetailView: View {
                 }
             }
         }
-        .frame(height: 22)
+        .frame(height: 10)
     }
 
     // ---- 记一笔 / 重读 ----
@@ -182,7 +183,7 @@ struct BookDetailView: View {
             } label: {
                 Text("重读")
                     .font(.body.bold())
-                    .foregroundStyle(.purple)
+                    .foregroundStyle(.blue)
                     .frame(maxWidth: .infinity)
             }
         } else {
@@ -191,7 +192,7 @@ struct BookDetailView: View {
             } label: {
                 Text("记一笔")
                     .font(.body.bold())
-                    .foregroundStyle(.purple)
+                    .foregroundStyle(.blue)
                     .frame(maxWidth: .infinity)
             }
         }
@@ -237,8 +238,8 @@ struct BookDetailView: View {
         }
     }
 
-    /// 今日目标强调色（与 Android CoralTarget 一致的珊瑚色）。
-    private static let coral = Color(red: 1.0, green: 0.45, blue: 0.40)
+    /// 今日目标强调色：统一使用系统蓝。
+    private static let coral = Color.accentColor
 
     // ---- 记录区（当前轮 + 旧轮折叠）----
 
@@ -272,7 +273,7 @@ struct BookDetailView: View {
                 Spacer()
                 if multiRound {
                     Text("第 \(book.currentRound) 轮")
-                        .foregroundStyle(.purple)
+                        .foregroundStyle(.blue)
                 }
             }
         }

@@ -37,11 +37,11 @@ struct CoverImageView: View {
 
     private var placeholder: some View {
         Rectangle()
-            .fill(Color.purple.opacity(0.12))
+            .fill(Color.blue.opacity(0.10))
             .overlay(
                 Text("书")
                     .font(.title3)
-                    .foregroundStyle(.purple.opacity(0.6)),
+                    .foregroundStyle(.blue.opacity(0.5)),
             )
     }
 

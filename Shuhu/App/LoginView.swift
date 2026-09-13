@@ -112,7 +112,7 @@ struct LoginView: View {
             } label: {
                 Image(systemName: agreed ? "checkmark.circle.fill" : "circle")
                     .font(.body)
-                    .foregroundStyle(agreed ? .purple : .secondary)
+                    .foregroundStyle(agreed ? .blue : .secondary)
             }
             .buttonStyle(.plain)
             .padding(.top, 1)
@@ -133,7 +133,7 @@ struct LoginView: View {
                 .font(.footnote)
             })
             .buttonStyle(.plain)
-            .tint(.purple)
+            .tint(.blue)
         }
     }
 

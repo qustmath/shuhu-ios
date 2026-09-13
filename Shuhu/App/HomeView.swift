@@ -220,7 +220,7 @@ private struct BookRow: View {
                     if book.currentRound > 1 {
                         Text("第 \(book.currentRound) 轮")
                             .font(.caption)
-                            .foregroundStyle(.purple)
+                            .foregroundStyle(.blue)
                     }
                 }
                 if let target = ReadingPlan.dailyTarget(
@@ -232,7 +232,7 @@ private struct BookRow: View {
                 ) {
                     Text(PlanLabels.dailyTargetLabel(target))
                         .font(.caption)
-                        .foregroundStyle(.purple)
+                        .foregroundStyle(.blue)
                 }
                 ProgressView(value: min(Double(currentPage), Double(max(book.totalPages, 1))), total: Double(max(book.totalPages, 1)))
                 Text("\(currentPage) / \(book.totalPages) 页")

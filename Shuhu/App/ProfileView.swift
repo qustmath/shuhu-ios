@@ -10,7 +10,7 @@ struct AboutView: View {
                 VStack(spacing: 10) {
                     Image(systemName: "book.closed.fill")
                         .font(.system(size: 52))
-                        .foregroundStyle(.purple)
+                        .foregroundStyle(.blue)
                     Text("书乎")
                         .font(.title.bold())
                     Text("v\(appVersion)")
@@ -113,9 +113,10 @@ struct ProfileView: View {
                 }
             }
             Section {
-                Text("所有数据仅保存在这台设备上；登录后可云同步")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                if member != nil {
+                    Button("退出登录") { showLogoutConfirm = true }
+                        .foregroundStyle(.red)
+                }
             }
         }
         .navigationTitle("设置")
@@ -199,7 +200,7 @@ struct ProfileView: View {
                 } label: {
                     HStack {
                         Text(syncing ? "同步中…" : "立即同步")
-                            .foregroundStyle(.purple)
+                            .foregroundStyle(.blue)
                         Spacer()
                         if syncing {
                             ProgressView()
@@ -210,8 +211,6 @@ struct ProfileView: View {
                 Text("上次同步：\(lastSyncText)")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                Button("退出登录") { showLogoutConfirm = true }
-                    .foregroundStyle(.red)
             } else {
                 Button {
                     showLogin = true
@@ -254,7 +253,7 @@ struct ProfileView: View {
             Spacer()
             Text(value)
                 .font(.body.bold())
-                .foregroundStyle(.purple)
+                .foregroundStyle(.blue)
             Text(unit)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
