@@ -12,7 +12,7 @@ struct CoverImageView: View {
 
     var body: some View {
         ZStack {
-            if let path, let url = remoteURL(path) {
+            if let path, let url = Self.remoteURL(path) {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFill()
