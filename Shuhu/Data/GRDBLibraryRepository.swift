@@ -2,13 +2,25 @@ import Foundation
 import GRDB
 
 /// `LibraryRepository` 的 GRDB 实现：写语义逐条对齐 Android `RoomLibraryRepository`
-/// （guid 生成、updatedAt 毫秒、软删级联、sortOrder 末尾追加、拖动排序事务）。
+/// （guid 生成、updatedAt 毫秒、软删级联、sortOrder 末尾追加、拖动排序事务、封面文件存取）。
+/// 封面图片以文件形式存于应用沙盒（coversDirectory），数据库只存路径。
 public final class GRDBLibraryRepository: LibraryRepository, Sendable {
 
     private let writer: any DatabaseWriter
+    private let coversDirectory: URL
 
-    public init(writer: any DatabaseWriter) {
+    public init(writer: any DatabaseWriter, coversDirectory: URL? = nil) {
         self.writer = writer
+        let dir: URL
+        if let coversDirectory {
+            dir = coversDirectory
+        } else {
+            // 默认与数据库同住 Application Support
+            let base = FileManager.default
+                .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            dir = base.appendingPathComponent("covers", isDirectory: true)
+        }
+        self.coversDirectory = dir
     }
 
     /// 应用入口用：文档目录下的 shuhu.sqlite。
@@ -16,7 +28,12 @@ public final class GRDBLibraryRepository: LibraryRepository, Sendable {
         let dir = try FileManager.default
             .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return GRDBLibraryRepository(writer: try Database.open(path: dir.appendingPathComponent("shuhu.sqlite").path))
+        let covers = dir.appendingPathComponent("covers", isDirectory: true)
+        try FileManager.default.createDirectory(at: covers, withIntermediateDirectories: true)
+        return GRDBLibraryRepository(
+            writer: try Database.open(path: dir.appendingPathComponent("shuhu.sqlite").path),
+            coversDirectory: covers,
+        )
     }
 
     // ---- 查询 ----
@@ -90,6 +107,9 @@ public final class GRDBLibraryRepository: LibraryRepository, Sendable {
 
     public func deleteBook(id: Int64) async throws {
         let now = currentTimeMillis()
+        let coverPath = try await writer.read { db in
+            try BookRow.filter(Column("id") == id).fetchOne(db)?.cover_image_path
+        }
         _ = try await writer.write { db in
             // 记录一并打墓碑（与 Android 一致：只墓碑未删行），再墓碑书本身
             try db.execute(
@@ -101,6 +121,7 @@ public final class GRDBLibraryRepository: LibraryRepository, Sendable {
                 arguments: [now, now, id],
             )
         }
+        deleteCoverFileSync(coverPath)
     }
 
     public func updateBookSortOrder(_ orderedIds: [Int64]) async throws {
@@ -118,7 +139,12 @@ public final class GRDBLibraryRepository: LibraryRepository, Sendable {
     public func addRecord(_ draft: NewRecord) async throws -> ReadingRecord {
         let now = currentTimeMillis()
         return try await writer.write { db in
+            // 新记录归入书籍当前轮次（与 Android 票据 06「添加记录自动归入 book.currentRound」一致）
+            guard let bookRow = try BookRow.filter(Column("id") == draft.bookId).fetchOne(db) else {
+                throw LibraryRepositoryError.bookNotFound
+            }
             var row = RecordRow(draft: draft)
+            row.round = bookRow.current_round
             row.guid = UUID().uuidString
             row.updated_at = now
             try row.insert(db)
@@ -144,6 +170,36 @@ public final class GRDBLibraryRepository: LibraryRepository, Sendable {
                 arguments: [now, now, id],
             )
         }
+    }
+
+    // ---- 封面文件 ----
+
+    public func saveCoverImage(bytes: Data, fileExtension: String) async throws -> String {
+        let ext = fileExtension.isEmpty ? "jpg" : fileExtension
+        try FileManager.default.createDirectory(at: coversDirectory, withIntermediateDirectories: true)
+        let file = coversDirectory.appendingPathComponent("\(UUID().uuidString).\(ext)")
+        try bytes.write(to: file, options: .atomic)
+        return file.path
+    }
+
+    public func deleteCoverFile(path: String?) async throws {
+        deleteCoverFileSync(path)
+    }
+
+    public func coverImageExists(path: String?) async throws -> Bool {
+        guard let path, !path.isEmpty else { return false }
+        return FileManager.default.fileExists(atPath: path)
+    }
+
+    public func readCoverImage(path: String?) async throws -> Data? {
+        guard let path, !path.isEmpty else { return nil }
+        return FileManager.default.contents(atPath: path)
+    }
+
+    /// 同步删除封面文件；路径为空或文件不存在时静默忽略（与 Android 语义一致）。
+    private func deleteCoverFileSync(_ path: String?) {
+        guard let path, !path.isEmpty else { return }
+        try? FileManager.default.removeItem(atPath: path)
     }
 
     // ---- 墓碑 ----
@@ -192,7 +248,7 @@ private struct BookRow: Codable, FetchableRecord, PersistableRecord {
         start_date = draft.startDate?.iso
         end_date = draft.endDate?.iso
         current_round = 1
-        cover_image_path = nil
+        cover_image_path = draft.coverImagePath
         sort_order = 0
         guid = ""
         updated_at = 0

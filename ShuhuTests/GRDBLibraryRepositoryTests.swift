@@ -122,6 +122,91 @@ final class GRDBLibraryRepositoryTests: XCTestCase {
         XCTAssertEqual(books.map(\.title), ["B", "A"], "拖动后的顺序持久化")
     }
 
+    // ---- 归轮（轮次：新记录归入书籍当前轮次）----
+
+    func testAddRecord_assignsBookCurrentRound() async throws {
+        let inserted = try await repository.addBook(draft())
+        let day = CalendarDay(year: 2026, month: 9, day: 12)
+        let round1 = try await repository.addRecord(NewRecord(bookId: inserted.id, date: day, pageReached: 100))
+        XCTAssertEqual(round1.round, 1, "currentRound=1 时新记录归第 1 轮")
+
+        var book = inserted
+        book.currentRound = 2
+        try await Task.sleep(nanoseconds: 2_000_000)
+        try await repository.updateBook(book)
+
+        let round2 = try await repository.addRecord(NewRecord(bookId: book.id, date: day, pageReached: 10))
+        XCTAssertEqual(round2.round, 2, "新记录自动归入书籍当前轮次")
+        let currentPage = try await repository.currentPage(bookId: book.id)
+        XCTAssertEqual(currentPage, 10, "当前页只看当前轮次，不受第 1 轮历史影响")
+    }
+
+    func testUpdateBook_roundTripsCurrentRound_forReread() async throws {
+        let inserted = try await repository.addBook(draft())
+        var book = inserted
+        book.currentRound = 2
+        try await Task.sleep(nanoseconds: 2_000_000)
+        try await repository.updateBook(book)
+
+        let reloaded = try await repository.book(id: inserted.id)
+        XCTAssertEqual(reloaded?.currentRound, 2, "重读写回的 currentRound 持久化")
+    }
+
+    // ---- 封面文件 ----
+
+    private func repositoryWithTempCovers() throws -> (GRDBLibraryRepository, URL) {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("shuhu-covers-\(UUID().uuidString)", isDirectory: true)
+        let repo = GRDBLibraryRepository(writer: try Database.open(), coversDirectory: dir)
+        return (repo, dir)
+    }
+
+    func testCoverImage_roundTripsThroughBookAndFiles() async throws {
+        let (repo, dir) = try repositoryWithTempCovers()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let bytes = Data([0x89, 0x50, 0x4E, 0x47])
+
+        let path = try await repo.saveCoverImage(bytes: bytes, fileExtension: "png")
+        XCTAssertTrue(path.hasSuffix(".png"), "文件按 UUID + 扩展名落盘")
+        let exists = try await repo.coverImageExists(path: path)
+        XCTAssertTrue(exists)
+        let readBack = try await repo.readCoverImage(path: path)
+        XCTAssertEqual(readBack, bytes, "字节可原样读回（同步上传用）")
+
+        let book = try await repo.addBook(
+            NewBook(title: "有封面的书", author: "", totalPages: 100, coverImagePath: path),
+        )
+        let reloaded = try await repo.book(id: book.id)
+        XCTAssertEqual(reloaded?.coverImagePath, path, "封面路径随书入库并可读回")
+
+        try await repo.deleteCoverFile(path: path)
+        let existsAfterDelete = try await repo.coverImageExists(path: path)
+        XCTAssertFalse(existsAfterDelete)
+    }
+
+    func testDeleteCoverFile_isSilentForNullOrMissing() async throws {
+        let (repo, dir) = try repositoryWithTempCovers()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        try await repo.deleteCoverFile(path: nil)
+        try await repo.deleteCoverFile(path: dir.appendingPathComponent("不存在的文件.jpg").path)
+    }
+
+    func testDeleteBook_cascadesCoverFile() async throws {
+        let (repo, dir) = try repositoryWithTempCovers()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let path = try await repo.saveCoverImage(bytes: Data([0xFF, 0xD8]), fileExtension: "jpg")
+        let book = try await repo.addBook(
+            NewBook(title: "书", author: "", totalPages: 10, coverImagePath: path),
+        )
+
+        try await repo.deleteBook(id: book.id)
+
+        let exists = try await repo.coverImageExists(path: path)
+        XCTAssertFalse(exists, "删书级联删除封面文件，避免垃圾文件堆积")
+    }
+
     // ---- 迁移幂等 ----
 
     func testMigration_isIdempotent_onExistingDatabase() async throws {

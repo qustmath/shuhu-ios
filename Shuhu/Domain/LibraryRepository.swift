@@ -1,3 +1,9 @@
+/// 仓库操作错误。
+public enum LibraryRepositoryError: Error, Sendable {
+    /// 目标书籍不存在（如已被删除）。
+    case bookNotFound
+}
+
 /// 本地书库仓库协议。命名与语义对齐 Android 端 `LibraryRepository`（ADR-0001：双端原生、同一份 spec）。
 ///
 /// 全部写入走「仓库维护 guid / updatedAt / 墓碑」的约定（同步就绪，ADR-0007）：
@@ -33,7 +39,7 @@ public protocol LibraryRepository: Sendable {
     /// 拖动排序：按给定顺序重写 sortOrder（同一事务，全部刷新 updatedAt）。
     func updateBookSortOrder(_ orderedIds: [Int64]) async throws
 
-    /// 新增记录：生成 guid、记 updatedAt。
+    /// 新增记录：生成 guid、记 updatedAt；自动归入该书当前轮次（currentRound）。
     func addRecord(_ draft: NewRecord) async throws -> ReadingRecord
 
     /// 更新记录，刷新 updatedAt。
@@ -41,6 +47,20 @@ public protocol LibraryRepository: Sendable {
 
     /// 软删单条记录。
     func deleteRecord(id: Int64) async throws
+
+    // ---- 封面文件（Android `LibraryRepository` 同名契约）----
+
+    /// 把封面图片字节存入仓库管理的沙盒存储，返回文件路径（存入 Book.coverImagePath）。
+    func saveCoverImage(bytes: Data, fileExtension: String) async throws -> String
+
+    /// 删除封面文件；路径为空或文件不存在时静默忽略。
+    func deleteCoverFile(path: String?) async throws
+
+    /// 封面文件是否仍然存在（用于界面优雅降级）。
+    func coverImageExists(path: String?) async throws -> Bool
+
+    /// 读取封面文件字节（同步上传用）；路径为空或文件不存在返回 nil。
+    func readCoverImage(path: String?) async throws -> Data?
 
     // ---- 墓碑读取（同步上行用；本地 UI 不可见） ----
 
@@ -56,13 +76,23 @@ public struct NewBook: Sendable {
     public var totalPages: Int
     public var startDate: CalendarDay?
     public var endDate: CalendarDay?
+    /// 封面文件路径；添加模式下先经 saveCoverImage 落盘再随书入库。
+    public var coverImagePath: String?
 
-    public init(title: String, author: String, totalPages: Int, startDate: CalendarDay? = nil, endDate: CalendarDay? = nil) {
+    public init(
+        title: String,
+        author: String,
+        totalPages: Int,
+        startDate: CalendarDay? = nil,
+        endDate: CalendarDay? = nil,
+        coverImagePath: String? = nil,
+    ) {
         self.title = title
         self.author = author
         self.totalPages = totalPages
         self.startDate = startDate
         self.endDate = endDate
+        self.coverImagePath = coverImagePath
     }
 }
 
