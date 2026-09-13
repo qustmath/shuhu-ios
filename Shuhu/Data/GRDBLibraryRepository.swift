@@ -225,6 +225,77 @@ public final class GRDBLibraryRepository: LibraryRepository, Sendable {
             try RecordRow.filter(sql: "deleted_at IS NOT NULL").fetchAll(db).map(\.toDomain)
         }
     }
+
+    // ---- 同步引擎专用 ----
+
+    public func bookByGuid(guid: String) async throws -> Book? {
+        try await writer.read { db in
+            try BookRow.filter(Column("guid") == guid).fetchOne(db)?.toDomain
+        }
+    }
+
+    public func recordByGuid(guid: String) async throws -> ReadingRecord? {
+        try await writer.read { db in
+            try RecordRow.filter(Column("guid") == guid).fetchOne(db)?.toDomain
+        }
+    }
+
+    public func record(id: Int64) async throws -> ReadingRecord? {
+        try await writer.read { db in
+            try RecordRow.filter(Column("id") == id)
+                .filter(sql: "deleted_at IS NULL")
+                .fetchOne(db)?
+                .toDomain
+        }
+    }
+
+    public func applyRemoteBook(_ book: Book) async throws -> Bool {
+        try await writer.write { db in
+            let existing = try BookRow.filter(Column("guid") == book.guid).fetchOne(db)
+            if existing == nil {
+                // 本地没有且远端为墓碑 → 无需落一行墓碑
+                guard book.deletedAt == nil else { return false }
+                var row = BookRow(book: book)
+                row.id = nil
+                try row.insert(db)
+                return true
+            }
+            if existing!.updated_at >= book.updatedAt { return false } // 本地较新或相同 → 本地获胜
+            // 远端较新 → 整行应用；远端无封面时保留本地封面路径（票 09 前的不丢封面妥协）
+            var merged = BookRow(book: book)
+            merged.id = existing!.id
+            merged.cover_image_path = book.coverImagePath ?? existing!.cover_image_path
+            try merged.update(db)
+            return true
+        }
+    }
+
+    public func applyRemoteRecord(_ record: ReadingRecord) async throws -> Bool {
+        try await writer.write { db in
+            let existing = try RecordRow.filter(Column("guid") == record.guid).fetchOne(db)
+            if existing == nil {
+                guard record.deletedAt == nil else { return false }
+                var row = RecordRow(record: record)
+                row.id = nil
+                try row.insert(db)
+                return true
+            }
+            if existing!.updated_at >= record.updatedAt { return false }
+            var merged = RecordRow(record: record)
+            merged.id = existing!.id
+            try merged.update(db)
+            return true
+        }
+    }
+
+    public func clearAllLibrary() async throws {
+        try await writer.write { db in
+            try db.execute(sql: "DELETE FROM reading_record")
+            try db.execute(sql: "DELETE FROM book")
+        }
+        // 封面文件一并清理（同步引擎专用；本地路径文件大概率不属于本机，静默即可）
+        try? FileManager.default.removeItem(at: coversDirectory)
+    }
 }
 
 private func currentTimeMillis() -> Int64 {

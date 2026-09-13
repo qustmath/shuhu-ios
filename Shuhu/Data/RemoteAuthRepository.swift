@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 // ---- 认证端点 DTO（与 Android `AuthDtos` 一致）----
 
