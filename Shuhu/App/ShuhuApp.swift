@@ -60,8 +60,8 @@ struct ShuhuApp: App {
                 if !splashReady {
                     // 开屏拉取等待态：主题底色，避免主页先闪一帧再跳开屏
                     Color(UIColor.systemBackground).ignoresSafeArea()
-                } else if let splashCreative {
-                    SplashAdView(creative: splashCreative, adsClient: container.adsClient) {
+                } else if let creative = splashCreative {
+                    SplashAdView(creative: creative, adsClient: container.adsClient) {
                         splashCreative = nil
                     }
                 } else {
