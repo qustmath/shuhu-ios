@@ -92,7 +92,7 @@ public final class SyncEngine: SyncController, @unchecked Sendable {
         let previous = syncChain
         let task = Task<Bool, Never> { [weak self] in
             guard let self else { return false }
-            await previous?.value
+            _ = await previous?.value
             return await self.performSync()
         }
         syncChain = task

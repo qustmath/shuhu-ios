@@ -56,7 +56,7 @@ struct ShuhuApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
+            ZStack {
                 if !splashReady {
                     // 开屏拉取等待态：主题底色，避免主页先闪一帧再跳开屏
                     Color(UIColor.systemBackground).ignoresSafeArea()
