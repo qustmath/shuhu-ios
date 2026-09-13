@@ -75,8 +75,15 @@ enum TestResponses {
     }
 
     static func businessError(code: Int, message: String) -> (HTTPURLResponse, Data) {
+        // 与服务端一致：业务失败同时体现为 HTTP 状态码（401/413/…）+ 中文信封 body
         let payload = try! JSONEncoder().encode(TestEnvelope<EmptyData?>(code: code, message: message, data: nil))
-        return response(with: payload)
+        let response = HTTPURLResponse(
+            url: URL(string: "https://test.local")!,
+            statusCode: code,
+            httpVersion: nil,
+            headerFields: nil,
+        )!
+        return (response, payload)
     }
 
     private static func response(with payload: Data) -> (HTTPURLResponse, Data) {

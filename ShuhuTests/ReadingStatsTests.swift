@@ -61,7 +61,7 @@ final class ReadingStatsTests: XCTestCase {
             record(bookId: 2, page: 299),
             record(bookId: 3, page: 100),
         ]
-        XCTAssertEqual(ReadingStats.finishedBookCount(books: books, records: records), 2, "书1 重读中不算、书2 未到、书3 读完")
+        XCTAssertEqual(ReadingStats.finishedBookCount(books: books, records: records), 1, "书1 重读中不算、书2 未到、仅书3 读完")
     }
 
     func testFinishedBookCount_noRecordsMeansNotFinished() {

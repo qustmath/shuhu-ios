@@ -253,7 +253,8 @@ final class GRDBLibraryRepositoryTests: XCTestCase {
         var withCover = local!
         withCover.coverImagePath = "/covers/local.jpg"
         try await repository.updateBook(withCover) // updatedAt 推进到「现在」
-        let newerRemote = Book(title: "云改名", author: "", totalPages: 300, guid: "g-1", updatedAt: withCover.updatedAt + 60_000)
+        let localAfterUpdate = try await repository.bookByGuid(guid: "g-1")!
+        let newerRemote = Book(title: "云改名", author: "", totalPages: 300, guid: "g-1", updatedAt: localAfterUpdate.updatedAt + 60_000)
         let appliedNewer = try await repository.applyRemoteBook(newerRemote)
         XCTAssertTrue(appliedNewer)
         let merged = try await repository.bookByGuid(guid: "g-1")

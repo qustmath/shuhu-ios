@@ -187,6 +187,7 @@ final class SyncEngineTests: XCTestCase {
 
     func testSync_suspendedWhileAccountSwitchPending_untilResolved() async throws {
         store.saveLastSync(accountId: 1, atMillis: 1_000)
+        session.send(member(id: 2)) // 裁决后 syncNow 需要登录态
         engine.pendingSwitchAccount.send(member(id: 2)) // 挂起态（检测逻辑另测）
 
         var networkCalls = 0
@@ -224,6 +225,7 @@ final class SyncEngineTests: XCTestCase {
 
     func testResolveSwitch_clearWipesLocalLibrary_beforeRebuildingFromCloud() async throws {
         store.saveLastSync(accountId: 1, atMillis: 1_000)
+        session.send(member(id: 2)) // 裁决后 syncNow 需要登录态
         engine.pendingSwitchAccount.send(member(id: 2))
 
         _ = try await repository.addBook(NewBook(title: "将被清空", author: "", totalPages: 10))
