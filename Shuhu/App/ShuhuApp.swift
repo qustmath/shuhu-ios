@@ -8,6 +8,7 @@ final class AppContainer {
     let repository: any LibraryRepository
     let auth: RemoteAuthRepository
     let sync: SyncEngine
+    let adsClient: AdsClient
 
     private let inner: GRDBLibraryRepository
 
@@ -35,6 +36,8 @@ final class AppContainer {
             store: SyncStore(),
         )
         repository = SyncAwareLibraryRepository(inner: inner, engine: sync)
+        // 广告走 authed 客户端（登录态自动带 token；匿名/失效均被服务端匿名放行）
+        adsClient = AdsClient(api: AdsApi(client: authedClient))
     }
 
     /// 启动时恢复登录态并启动同步引擎（视图 .task 调用；engine.start 幂等）。
@@ -48,14 +51,37 @@ final class AppContainer {
 struct ShuhuApp: App {
     private let container = AppContainer()
 
+    @State private var splashCreative: AdCreativeData?
+    @State private var splashReady = false
+
     var body: some Scene {
         WindowGroup {
-            HomeView(
-                repository: container.repository,
-                auth: container.auth,
-                sync: container.sync,
-            )
-            .task { container.bootstrap() }
+            Group {
+                if !splashReady {
+                    // 开屏拉取等待态：主题底色，避免主页先闪一帧再跳开屏
+                    Color(UIColor.systemBackground).ignoresSafeArea()
+                } else if let splashCreative {
+                    SplashAdView(creative: splashCreative, adsClient: container.adsClient) {
+                        splashCreative = nil
+                    }
+                } else {
+                    HomeView(
+                        repository: container.repository,
+                        auth: container.auth,
+                        sync: container.sync,
+                        adsClient: container.adsClient,
+                    )
+                    .task { container.bootstrap() }
+                }
+            }
+            .task { await fetchSplash() }
         }
+    }
+
+    /// 冷启动拉取开屏素材（含失败/无素材）：完成即放行进主页。
+    private func fetchSplash() async {
+        let creatives = await container.adsClient.activeCreatives(slot: AdSlots.splash)
+        splashCreative = creatives.first
+        splashReady = true
     }
 }

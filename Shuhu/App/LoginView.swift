@@ -7,7 +7,6 @@ struct LoginView: View {
     let onDone: () async -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
 
     @State private var mode: Mode = .login
     @State private var phone = ""
@@ -17,6 +16,8 @@ struct LoginView: View {
     @State private var busy = false
     @State private var errorMessage: String?
     @State private var countdownTask: Task<Void, Never>?
+    @State private var agreed = false
+    @State private var legalURL: URL?
 
     enum Mode: String, CaseIterable, Identifiable {
         case login = "登录"
@@ -69,10 +70,10 @@ struct LoginView: View {
                         Text(busy ? "请稍候…" : (mode == .login ? "登录" : "注册并登录"))
                             .frame(maxWidth: .infinity)
                     }
-                    .disabled(!inputValid || busy)
+                    .disabled(!inputValid || !agreed || busy)
                 }
                 Section {
-                    legalFooter
+                    agreementRow
                 }
             }
             .navigationTitle(mode == .login ? "登录" : "注册")
@@ -87,39 +88,49 @@ struct LoginView: View {
             } message: {
                 Text(errorMessage ?? "")
             }
+            .sheet(isPresented: Binding(
+                get: { legalURL != nil },
+                set: { if !$0 { legalURL = nil } },
+            )) {
+                if let legalURL {
+                    InAppBrowserView(url: legalURL)
+                }
+            }
         }
         .presentationDetents([.large])
         .onDisappear { countdownTask?.cancel() }
     }
 
-    private var legalFooter: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 0) {
-                Text("登录即代表同意")
+    /// 协议勾选行：不勾选不能登录/注册；协议在 App 内打开。
+    private var agreementRow: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Button {
+                agreed.toggle()
+            } label: {
+                Image(systemName: agreed ? "checkmark.circle.fill" : "circle")
+                    .font(.body)
+                    .foregroundStyle(agreed ? .purple : .secondary)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 1)
+            (HStack(spacing: 0) {
+                Text("我已阅读并同意")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                link("《用户协议》", urlString: LegalPages.terms)
-                link("与", urlString: nil)
-                link("《隐私政策》", urlString: LegalPages.privacy)
-            }
-        }
-    }
-
-    private func link(_ label: String, urlString: String?) -> some View {
-        Group {
-            if let urlString {
-                Button(label) {
-                    if let url = URL(string: urlString) {
-                        openURL(url)
-                    }
+                Button("《用户协议》") {
+                    legalURL = URL(string: LegalPages.terms)
                 }
                 .font(.footnote)
-                .foregroundStyle(.purple)
-            } else {
-                Text(label)
+                Text("与")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-            }
+                Button("《隐私政策》") {
+                    legalURL = URL(string: LegalPages.privacy)
+                }
+                .font(.footnote)
+            })
+            .buttonStyle(.plain)
+            .tint(.purple)
         }
     }
 

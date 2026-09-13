@@ -59,14 +59,22 @@ public final class ApiClient: @unchecked Sendable {
 
     // ---- 端点便捷方法 ----
 
-    public func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> Envelope<T> {
-        let (data, _) = try await send(path: path, method: "GET", query: query, body: nil, contentType: nil)
+    public func get<T: Decodable>(
+        _ path: String,
+        query: [URLQueryItem] = [],
+        timeout: TimeInterval? = nil,
+    ) async throws -> Envelope<T> {
+        let (data, _) = try await send(path: path, method: "GET", query: query, body: nil, contentType: nil, timeout: timeout)
         return try decode(data)
     }
 
-    public func post<Body: Encodable, T: Decodable>(_ path: String, body: Body) async throws -> Envelope<T> {
+    public func post<Body: Encodable, T: Decodable>(
+        _ path: String,
+        body: Body,
+        timeout: TimeInterval? = nil,
+    ) async throws -> Envelope<T> {
         let payload = try JSONEncoder().encode(body)
-        let (data, _) = try await send(path: path, method: "POST", query: [], body: payload, contentType: "application/json")
+        let (data, _) = try await send(path: path, method: "POST", query: [], body: payload, contentType: "application/json", timeout: timeout)
         return try decode(data)
     }
 
@@ -111,6 +119,7 @@ public final class ApiClient: @unchecked Sendable {
         query: [URLQueryItem],
         body: Data?,
         contentType: String?,
+        timeout: TimeInterval? = nil,
     ) async throws -> (Data, HTTPURLResponse) {
         var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
         if !query.isEmpty { components?.queryItems = query }
@@ -121,6 +130,9 @@ public final class ApiClient: @unchecked Sendable {
         var request = baseRequest
         request.httpMethod = method
         request.httpBody = body
+        if let timeout {
+            request.timeoutInterval = timeout
+        }
         if let contentType {
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }

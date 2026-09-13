@@ -7,6 +7,7 @@ struct HomeView: View {
     private let repository: any LibraryRepository
     private let auth: AuthRepository
     private let sync: SyncController
+    private let adsClient: AdsClient
 
     @State private var books: [Book] = []
     @State private var currentPages: [Int64: Int] = [:] // bookId → 当前页
@@ -14,10 +15,14 @@ struct HomeView: View {
     @State private var loadError: String?
     @SceneStorage("home.finishedExpanded") private var finishedExpanded = false
 
-    init(repository: any LibraryRepository, auth: AuthRepository, sync: SyncController) {
+    @State private var bottomAd: AdCreativeData?
+    @State private var reportedAdImpressions: Set<Int64> = []
+
+    init(repository: any LibraryRepository, auth: AuthRepository, sync: SyncController, adsClient: AdsClient) {
         self.repository = repository
         self.auth = auth
         self.sync = sync
+        self.adsClient = adsClient
     }
 
     private var readingBooks: [Book] {
@@ -149,6 +154,17 @@ struct HomeView: View {
                         }
                     }
                 }
+            }
+            // 列表底部广告卡（最后一项；无素材时不出现在列表中）
+            if let ad = bottomAd {
+                ListBottomAdCard(creative: ad, adsClient: adsClient) {
+                    // 进入视口即视为曝光，只上报一次
+                    if reportedAdImpressions.insert(ad.id).inserted {
+                        adsClient.reportImpressions(slot: AdSlots.homeListBottom, ids: [ad.id])
+                    }
+                }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
             }
         }
     }

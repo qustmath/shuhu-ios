@@ -19,7 +19,7 @@ struct ProfileView: View {
     @State private var totalPagesRead: Int64 = 0
     @State private var loadError: String?
 
-    @Environment(\.openURL) private var openURL
+    @State private var legalURL: URL?
 
     init(repository: any LibraryRepository, auth: AuthRepository, sync: SyncController) {
         self.repository = repository
@@ -118,6 +118,14 @@ struct ProfileView: View {
         } message: {
             Text(loadError ?? "")
         }
+        .sheet(isPresented: Binding(
+            get: { legalURL != nil },
+            set: { if !$0 { legalURL = nil } },
+        )) {
+            if let legalURL {
+                InAppBrowserView(url: legalURL)
+            }
+        }
     }
 
     // ---- 账号与同步 ----
@@ -205,9 +213,7 @@ struct ProfileView: View {
 
     private func legalRow(_ label: String, urlString: String) -> some View {
         Button {
-            if let url = URL(string: urlString) {
-                openURL(url)
-            }
+            legalURL = URL(string: urlString) // App 内打开（与 Android WebViewScreen 一致）
         } label: {
             HStack {
                 Text(label)
