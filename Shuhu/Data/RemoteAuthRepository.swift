@@ -32,7 +32,7 @@ public struct LogoutRequest: Encodable, Sendable {
 }
 
 /// 会员资料。微信注册的空壳账号 username/phone 为 JSON null，故均可空。
-public struct MemberProfileData: Decodable, Sendable {
+public struct MemberProfileData: Codable, Sendable {
     public let id: Int64
     public let username: String?
     public let phone: String?
@@ -45,7 +45,7 @@ public struct MemberProfileData: Decodable, Sendable {
 }
 
 /// 登录/注册/刷新令牌的统一返回：令牌 + 最新会员资料。
-public struct MemberLoginData: Decodable, Sendable {
+public struct MemberLoginData: Codable, Sendable {
     public let accessToken: String
     public let refreshToken: String
     public let expiresIn: Int64
