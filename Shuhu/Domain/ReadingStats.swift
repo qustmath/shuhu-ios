@@ -30,7 +30,7 @@ public enum ReadingStats {
     public static func finishedBookCount(books: [Book], records: [ReadingRecord]) -> Int {
         books.filter { book in
             let page = ReadingRules.currentPage(
-                records.filter { $0.bookId == book.id },
+                records: records.filter { $0.bookId == book.id },
                 round: book.currentRound,
             )
             return ReadingRules.isFinished(currentPage: page, totalPages: book.totalPages)

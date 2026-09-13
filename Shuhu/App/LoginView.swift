@@ -4,7 +4,7 @@ import SwiftUI
 /// 登录态经引擎的 session 观察自动触发首轮同步，本页只负责身份。
 struct LoginView: View {
     let auth: AuthRepository
-    let onDone: () -> Void
+    let onDone: () async -> Void
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -160,7 +160,7 @@ struct LoginView: View {
             case .register:
                 _ = try await auth.register(phone: phone, password: password, code: code, method: Sms.methodSms)
             }
-            onDone()
+            await onDone()
             dismiss()
         } catch {
             errorMessage = (error as? ApiError)?.message ?? error.localizedDescription
