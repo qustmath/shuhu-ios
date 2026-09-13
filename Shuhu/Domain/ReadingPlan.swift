@@ -66,6 +66,11 @@ public func validateBookDates(start: CalendarDay?, end: CalendarDay?) -> BookDat
 /// 计划相关展示文案（与 Android 端 `DateFormats` 逐条对应，参照同一批设计稿）。
 public enum PlanLabels {
 
+    /// 日期标签：`09月04日`。
+    public static func planDate(_ date: CalendarDay) -> String {
+        String(format: "%02d月%02d日", date.month, date.day)
+    }
+
     /// 计划结束日标签：`(5天) 09月04日`。
     public static func planDateWithDuration(durationDays: Int, end: CalendarDay) -> String {
         String(format: "(%d天) %02d月%02d日", durationDays, end.month, end.day)

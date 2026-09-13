@@ -1,8 +1,69 @@
 import SwiftUI
-import Combine
+
+/// 关于页：应用名 + 版本 + 简介 + 用户协议/隐私政策（App 内打开）。
+struct AboutView: View {
+    @State private var legalURL: URL?
+
+    var body: some View {
+        List {
+            Section {
+                VStack(spacing: 10) {
+                    Image(systemName: "book.closed.fill")
+                        .font(.system(size: 52))
+                        .foregroundStyle(.purple)
+                    Text("书乎")
+                        .font(.title.bold())
+                    Text("v\(appVersion)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+            }
+            Section {
+                Text("书乎是一款简约的阅读记录工具：记下每天读到的页码，制定阅读计划，看看今天还差几页；读完了就开一轮重读。所有数据就在这台设备上，登录后可在你的设备间云同步。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                legalRow("用户协议", urlString: LegalPages.terms)
+                legalRow("隐私政策", urlString: LegalPages.privacy)
+            }
+        }
+        .navigationTitle("关于")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: Binding(
+            get: { legalURL != nil },
+            set: { if !$0 { legalURL = nil } },
+        )) {
+            if let legalURL {
+                InAppBrowserView(url: legalURL)
+            }
+        }
+    }
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+    }
+
+    private func legalRow(_ label: String, urlString: String) -> some View {
+        Button {
+            legalURL = URL(string: urlString)
+        } label: {
+            HStack {
+                Text(label)
+                    .foregroundStyle(.primary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
 
 /// 「我」页（设置）：账号与同步区（登录/登出/立即同步/换账号裁决）
-/// + 应用名与版本 + 两项统计 + 法律条款入口（Android `ProfileScreen` 镜像）。
+/// + 统计 + 关于入口（Android `ProfileScreen` 镜像）。
 struct ProfileView: View {
     private let repository: any LibraryRepository
     private let auth: AuthRepository
@@ -18,8 +79,6 @@ struct ProfileView: View {
     @State private var finishedBooks = 0
     @State private var totalPagesRead: Int64 = 0
     @State private var loadError: String?
-
-    @State private var legalURL: URL?
 
     init(repository: any LibraryRepository, auth: AuthRepository, sync: SyncController) {
         self.repository = repository
@@ -39,19 +98,19 @@ struct ProfileView: View {
         List {
             accountSection
             Section {
-                HStack {
-                    Text("书乎")
-                        .font(.headline)
-                    Text("v\(appVersion)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
                 statRow(label: "已读完", value: "\(finishedBooks)", unit: "本")
                 statRow(label: "累计阅读", value: "\(totalPagesRead)", unit: "页")
-            }
-            Section {
-                legalRow("用户协议", urlString: LegalPages.terms)
-                legalRow("隐私政策", urlString: LegalPages.privacy)
+                NavigationLink {
+                    AboutView()
+                } label: {
+                    HStack {
+                        Text("关于")
+                        Spacer()
+                        Text("v\(appVersion)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             Section {
                 Text("所有数据仅保存在这台设备上；登录后可云同步")
@@ -85,7 +144,6 @@ struct ProfileView: View {
                 }
             }
         }
-        .task { await reload() }
         .sheet(isPresented: $showLogin) {
             LoginView(auth: auth) {
                 await refreshStats()
@@ -117,14 +175,6 @@ struct ProfileView: View {
             Button("好", role: .cancel) {}
         } message: {
             Text(loadError ?? "")
-        }
-        .sheet(isPresented: Binding(
-            get: { legalURL != nil },
-            set: { if !$0 { legalURL = nil } },
-        )) {
-            if let legalURL {
-                InAppBrowserView(url: legalURL)
-            }
         }
     }
 
@@ -208,21 +258,6 @@ struct ProfileView: View {
             Text(unit)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-        }
-    }
-
-    private func legalRow(_ label: String, urlString: String) -> some View {
-        Button {
-            legalURL = URL(string: urlString) // App 内打开（与 Android WebViewScreen 一致）
-        } label: {
-            HStack {
-                Text(label)
-                    .foregroundStyle(.primary)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
         }
     }
 

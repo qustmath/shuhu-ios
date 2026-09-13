@@ -35,46 +35,49 @@ struct LoginView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    Picker("模式", selection: $mode) {
-                        ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
+            VStack(spacing: 0) {
+                Form {
+                    Section {
+                        Picker("模式", selection: $mode) {
+                            ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                }
-                Section(mode == .login ? "账号登录" : "创建账号") {
-                    TextField("手机号", text: $phone)
-                        .keyboardType(.numberPad)
-                        .textContentType(.username)
-                    SecureField("密码", text: $password)
-                        .textContentType(.newPassword)
-                    if mode == .register {
-                        HStack {
-                            TextField("验证码", text: $code)
-                                .keyboardType(.numberPad)
-                            Button {
-                                Task { await sendCode() }
-                            } label: {
-                                Text(countdown > 0 ? "\(countdown)s" : "获取验证码")
-                                    .font(.footnote)
+                    Section(mode == .login ? "账号登录" : "创建账号") {
+                        TextField("手机号", text: $phone)
+                            .keyboardType(.numberPad)
+                            .textContentType(.username)
+                        SecureField("密码", text: $password)
+                            .textContentType(.newPassword)
+                        if mode == .register {
+                            HStack {
+                                TextField("验证码", text: $code)
+                                    .keyboardType(.numberPad)
+                                Button {
+                                    Task { await sendCode() }
+                                } label: {
+                                    Text(countdown > 0 ? "\(countdown)s" : "获取验证码")
+                                        .font(.footnote)
+                                }
+                                .disabled(countdown > 0 || !phoneValid || busy)
                             }
-                            .disabled(countdown > 0 || !phoneValid || busy)
                         }
                     }
-                }
-                Section {
-                    Button {
-                        Task { await submit() }
-                    } label: {
-                        Text(busy ? "请稍候…" : (mode == .login ? "登录" : "注册并登录"))
-                            .frame(maxWidth: .infinity)
+                    Section {
+                        Button {
+                            Task { await submit() }
+                        } label: {
+                            Text(busy ? "请稍候…" : (mode == .login ? "登录" : "注册并登录"))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .disabled(!inputValid || !agreed || busy)
                     }
-                    .disabled(!inputValid || !agreed || busy)
                 }
-                Section {
-                    agreementRow
-                }
+                // 协议勾选行：无卡片背景，融入页面默认背景（与 Android 脚注一致）
+                agreementRow
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
             }
             .navigationTitle(mode == .login ? "登录" : "注册")
             .navigationBarTitleDisplayMode(.inline)

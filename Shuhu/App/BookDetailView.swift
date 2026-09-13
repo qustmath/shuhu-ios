@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// 书籍详情：封面头部 + 「记一笔 / 重读」+ 记录时间线（分轮展示）。
-/// 记录为「读到的累计页码」；可补记过去的日子；可编辑、左滑删除。
+/// 书籍详情（对齐 Android `BookDetailScreen` 布局）：
+/// 头部（封面+书名+作者+轮次）→ 进度卡（大页码数字+粗进度条）→ 记一笔/重读 →
+/// 计划卡（起止日期+今日目标）→ 记录时间线（分轮展示，可编辑/左滑删除）。
+/// 记录为「读到的累计页码」；可补记过去的日子。
 /// 已读完的书隐藏「记一笔」（页码合法区间为空），以「重读」替代：currentRound+1，进度归零，历史保留。
 struct BookDetailView: View {
     private let repository: any LibraryRepository
@@ -42,36 +44,17 @@ struct BookDetailView: View {
     var body: some View {
         List {
             if let book {
-                Section {
-                    HStack(spacing: 14) {
-                        CoverImageView(path: book.coverImagePath, width: 92, height: 124)
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 8) {
-                                Text("\(currentPage) / \(book.totalPages) 页")
-                                    .font(.title3.bold())
-                                if multiRound {
-                                    Text("第 \(book.currentRound) 轮")
-                                        .font(.caption)
-                                        .foregroundStyle(.purple)
-                                }
-                            }
-                            if let plan = planLine(book) {
-                                Text(plan)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
+                headerSection(book)
+                progressSection(book)
                 Section {
                     actionButton(book)
                         .frame(maxWidth: .infinity)
                 }
+                planSection(book)
                 recordsSection(book)
             }
         }
-        .navigationTitle(book?.title ?? "")
+        .navigationTitle("阅读计划")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -111,6 +94,85 @@ struct BookDetailView: View {
         }
     }
 
+    // ---- 头部：封面 + 书名 + 作者 + 轮次（Android HeaderCard）----
+
+    private func headerSection(_ book: Book) -> some View {
+        Section {
+            HStack(alignment: .top, spacing: 16) {
+                CoverImageView(path: book.coverImagePath, width: 92, height: 124)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(book.title)
+                        .font(.title2.bold())
+                        .lineLimit(2)
+                    HStack(spacing: 8) {
+                        if !book.author.isEmpty {
+                            Text(book.author)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        if multiRound {
+                            Text("第 \(book.currentRound) 轮")
+                                .font(.footnote)
+                                .foregroundStyle(.purple)
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    // ---- 进度卡：大页码数字 + 粗进度条（Android ProgressCard）----
+
+    private func progressSection(_ book: Book) -> some View {
+        Section {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text("\(currentPage)")
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(.purple)
+                    Text(" / \(book.totalPages) 页")
+                        .font(.title2.bold())
+                }
+                progressBar(book)
+            }
+            .padding(.vertical, 6)
+        }
+    }
+
+    /// 粗进度条：高 22 圆角胶囊；进度 >15% 时白字百分比在条内，否则灰字在右侧（Android 同规则）。
+    private func progressBar(_ book: Book) -> some View {
+        let ratio = ReadingRules.progressPercent(currentPage: currentPage, totalPages: book.totalPages)
+        let percentText = "\(Int((ratio * 100).rounded()))%"
+        return GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.purple.opacity(0.12))
+                Capsule()
+                    .fill(Color.purple)
+                    .frame(width: max(proxy.size.width * ratio, ratio > 0 ? 22 : 0))
+                    .overlay(alignment: .trailing) {
+                        if ratio > 0.15 {
+                            Text(percentText)
+                                .font(.caption)
+                                .foregroundStyle(.white)
+                                .padding(.trailing, 8)
+                        }
+                    }
+                if ratio <= 0.15 {
+                    Text(percentText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.trailing, 8)
+                }
+            }
+        }
+        .frame(height: 22)
+    }
+
+    // ---- 记一笔 / 重读 ----
+
     /// 已读完 → 「重读」；否则 → 「记一笔」（与 Android 详情页行为一致）。
     @ViewBuilder
     private func actionButton(_ book: Book) -> some View {
@@ -134,6 +196,51 @@ struct BookDetailView: View {
             }
         }
     }
+
+    // ---- 计划卡（Android PlanCard）：起止行 + 今天目标行；自由阅读/已到期整卡不显示（ADR-0002）----
+
+    @ViewBuilder
+    private func planSection(_ book: Book) -> some View {
+        if let start = book.startDate, let end = book.endDate, CalendarDay.today() <= end {
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(PlanLabels.planDate(start))
+                        Spacer()
+                        Text(PlanLabels.planDateWithDuration(
+                            durationDays: ReadingPlan.planDurationDays(start: start, end: end),
+                            end: end,
+                        ))
+                    }
+                    if let target = ReadingPlan.dailyTarget(
+                        totalPages: book.totalPages,
+                        currentPage: currentPage,
+                        startDate: start,
+                        endDate: end,
+                        today: CalendarDay.today(),
+                    ) {
+                        HStack {
+                            Text(PlanLabels.dailyTargetLabel(target))
+                                .foregroundStyle(Self.coral)
+                            Spacer()
+                            Text(PlanLabels.daysLeft(ReadingPlan.remainingDays(
+                                today: CalendarDay.today(),
+                                endDate: end,
+                            )))
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .font(.subheadline)
+                .padding(.vertical, 2)
+            }
+        }
+    }
+
+    /// 今日目标强调色（与 Android CoralTarget 一致的珊瑚色）。
+    private static let coral = Color(red: 1.0, green: 0.45, blue: 0.40)
+
+    // ---- 记录区（当前轮 + 旧轮折叠）----
 
     @ViewBuilder
     private func recordsSection(_ book: Book) -> some View {
@@ -169,16 +276,6 @@ struct BookDetailView: View {
                 }
             }
         }
-    }
-
-    /// 计划信息行：`(5天) 09月04日 · 剩 4 天`；自由阅读或已到期返回 nil（ADR-0002）。
-    private func planLine(_ book: Book) -> String? {
-        guard let start = book.startDate, let end = book.endDate else { return nil }
-        let today = CalendarDay.today()
-        guard today <= end else { return nil }
-        let duration = ReadingPlan.planDurationDays(start: start, end: end)
-        let left = ReadingPlan.remainingDays(today: today, endDate: end)
-        return "\(PlanLabels.planDateWithDuration(durationDays: duration, end: end)) · \(PlanLabels.daysLeft(left))"
     }
 
     /// 重读：当前轮 +1 写回仓库；新轮无记录 → 当前进度归零、回到在读区，历史原样保留。

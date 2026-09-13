@@ -181,6 +181,12 @@ struct HomeView: View {
         } catch {
             loadError = error.localizedDescription
         }
+        await loadBottomAd()
+    }
+
+    /// 列表底部广告卡素材：失败/无素材为 nil（广告卡不出现在列表），不报错。
+    private func loadBottomAd() async {
+        bottomAd = await adsClient.activeCreatives(slot: AdSlots.homeListBottom).first
     }
 
     private func delete(_ source: [Book], at offsets: IndexSet) async {

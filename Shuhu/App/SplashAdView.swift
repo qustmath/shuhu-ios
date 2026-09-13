@@ -16,14 +16,18 @@ struct SplashAdView: View {
     private static let splashSeconds = 4
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        ZStack {
             Color.black.ignoresSafeArea()
             remoteImage
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { handleTap() }
+        }
+        // 跳过按钮挂在安全区内顶部：不被状态栏压住（素材图仍全屏铺满）
+        .overlay(alignment: .topTrailing) {
             skipButton
                 .padding(.trailing, 16)
+                .padding(.top, 8)
         }
         .task {
             adsClient.reportImpressions(slot: AdSlots.splash, ids: [creative.id])
