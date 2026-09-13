@@ -70,17 +70,22 @@ struct HomeView: View {
                         Image(systemName: "person.circle")
                     }
                 }
-                ToolbarItem(placement: .bottomBar) {
-                    HStack {
-                        Spacer()
-                        Button {
-                            showAddBook = true
-                        } label: {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 44))
-                        }
-                    }
+            }
+            // 新增书籍的悬浮按钮（FAB）：不用 bottomBar——它会画一条底部背景横条，
+            // 且从详情页返回后工具栏项会漂移到左侧
+            .overlay(alignment: .bottomTrailing) {
+                Button {
+                    showAddBook = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 26, weight: .medium))
+                        .foregroundStyle(.white)
+                        .frame(width: 58, height: 58)
+                        .background(Color(UIColor.systemGray), in: Circle())
+                        .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
                 }
+                .padding(.trailing, 20)
+                .padding(.bottom, 28)
             }
             .sheet(isPresented: $showAddBook) {
                 BookFormView(repository: repository) {
