@@ -243,7 +243,7 @@ final class RemoteAuthRepositoryTests: XCTestCase {
 
         var paths: [String] = []
         MockURLProtocol.handler = { request in
-            paths.append("\(request.httpMethod) \(request.url?.path ?? "")")
+            paths.append("\(request.httpMethod ?? "") \(request.url?.path ?? "")")
             switch (request.httpMethod, request.url?.path) {
             case ("PUT", "/api/v1/member/profile"):
                 let body = try? JSONSerialization.jsonObject(with: request.bodyData ?? Data()) as? [String: Any]
@@ -291,7 +291,7 @@ final class RemoteAuthRepositoryTests: XCTestCase {
 
         var paths: [String] = []
         MockURLProtocol.handler = { request in
-            paths.append("\(request.httpMethod) \(request.url?.path ?? "")")
+            paths.append("\(request.httpMethod ?? "") \(request.url?.path ?? "")")
             switch (request.httpMethod, request.url?.path) {
             case ("POST", "/api/v1/sync/covers"):
                 return TestResponses.ok(SyncCoverUploadData(path: "/static/covers/abc.jpg"))
