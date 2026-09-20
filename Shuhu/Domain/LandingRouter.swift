@@ -17,8 +17,8 @@ public enum LandingRouter {
     }
 
     /// 内部路由表：内部路由名 → 是否已支持（App 内已有对应页面/动作）。
-    /// 会员购买页随付费会员功能上线后在此登记；当前为空，覆盖未知目标降级。
-    private static let internalRoutes: Set<String> = []
+    /// membership.purchase = 会员购买页（付费会员已上线）；未登记的未知目标仍安全降级 NoOp。
+    private static let internalRoutes: Set<String> = ["membership.purchase"]
 
     public static func resolve(landingType: String, landingTarget: String) -> LandingAction {
         switch landingType {

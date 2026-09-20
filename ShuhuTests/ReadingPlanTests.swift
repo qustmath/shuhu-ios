@@ -140,9 +140,9 @@ final class ReadingPlanTests: XCTestCase {
 
     // ---- 展示文案 ----
 
-    func testPlanLabels_matchReferenceScreenshots() {
-        XCTAssertEqual(PlanLabels.planDateWithDuration(durationDays: 5, end: d(9, 4)), "(5天) 09月04日")
-        XCTAssertEqual(PlanLabels.daysLeft(5), "剩 5 天")
-        XCTAssertEqual(PlanLabels.dailyTargetLabel(59), "今天目标 59 页")
+    func testDateFormats_matchReferenceScreenshots() {
+        XCTAssertEqual(DateFormats.planDateWithDuration(days: 5, date: d(9, 4)), "(5天) 09月04日")
+        XCTAssertEqual(DateFormats.daysLeft(5), "剩 5 天")
+        XCTAssertEqual(DateFormats.dailyTargetLabel(59), "今天目标 59 页")
     }
 }

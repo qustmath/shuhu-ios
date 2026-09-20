@@ -21,11 +21,19 @@ final class LandingRouterTests: XCTestCase {
         )
     }
 
-    func testInternalRoute_unknownTargetDegradesToNoOp() {
+    func testInternalRoute_membershipPurchaseIsRegistered() {
         XCTAssertEqual(
             LandingRouter.resolve(landingType: "internal", landingTarget: "membership.purchase"),
+            .internalRoute("membership.purchase"),
+            "会员购买页已上线，路由表已登记",
+        )
+    }
+
+    func testInternalRoute_unknownTargetDegradesToNoOp() {
+        XCTAssertEqual(
+            LandingRouter.resolve(landingType: "internal", landingTarget: "some.future.page"),
             .noOp,
-            "会员购买页上线前不在路由表，安全降级",
+            "未登记的内部目标安全降级",
         )
     }
 

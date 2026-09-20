@@ -68,4 +68,59 @@ final class ReadingStatsTests: XCTestCase {
         let books = [Book(id: 1, title: "书", author: "", totalPages: 10)]
         XCTAssertEqual(ReadingStats.finishedBookCount(books: books, records: []), 0)
     }
+
+    // ---- 区间已读页数（首页「本月已读页」）----
+
+    func testTotalPagesReadBetween_countsOnlyDeltasWithinRange() {
+        let records = [
+            record(bookId: 1, page: 10, date: CalendarDay(year: 2026, month: 8, day: 31)), // 区间外首条：只推进基数
+            record(bookId: 1, page: 35, date: CalendarDay(year: 2026, month: 9, day: 1)),  // +25 归 9 月
+            record(bookId: 1, page: 60, date: CalendarDay(year: 2026, month: 9, day: 20)), // +25 归 9 月
+            record(bookId: 1, page: 90, date: CalendarDay(year: 2026, month: 10, day: 1)), // 区间外
+        ]
+        let from = CalendarDay(year: 2026, month: 9, day: 1)
+        let to = CalendarDay(year: 2026, month: 9, day: 30)
+        XCTAssertEqual(ReadingStats.totalPagesReadBetween(records: records, from: from, to: to), 50)
+    }
+
+    func testTotalPagesReadBetween_emptyIsZero() {
+        let from = CalendarDay(year: 2026, month: 9, day: 1)
+        XCTAssertEqual(ReadingStats.totalPagesReadBetween(records: [], from: from, to: from), 0)
+    }
+
+    // ---- 某日期后读完的本数（首页「今年读完」）----
+
+    func testFinishedCountSince_requiresFinishDatedOnOrAfterEarliest() {
+        let books = [
+            Book(id: 1, title: "今年读完", author: "", totalPages: 100),
+            Book(id: 2, title: "去年读完", author: "", totalPages: 100),
+            Book(id: 3, title: "读完但无记录", author: "", totalPages: 100),
+            Book(id: 4, title: "未读完", author: "", totalPages: 100),
+        ]
+        let records = [
+            record(bookId: 1, page: 100, date: CalendarDay(year: 2026, month: 3, day: 5)),
+            record(bookId: 2, page: 100, date: CalendarDay(year: 2025, month: 12, day: 31)),
+            record(bookId: 4, page: 99, date: CalendarDay(year: 2026, month: 3, day: 5)),
+        ]
+        let earliest = CalendarDay(year: 2026, month: 1, day: 1)
+        XCTAssertEqual(
+            ReadingStats.finishedCountSince(books: books, records: records, earliest: earliest),
+            1,
+            "书2 去年读完不计、书3 无记录无从 dating 不计、书4 未读完不计",
+        )
+    }
+
+    func testFinishedCountSince_usesCurrentRoundLastRecordDate() {
+        let books = [Book(id: 1, title: "书", author: "", totalPages: 100, currentRound: 2)]
+        let records = [
+            record(bookId: 1, page: 100, round: 1, date: CalendarDay(year: 2025, month: 6, day: 1)), // 第 1 轮去年读完
+            record(bookId: 1, page: 100, round: 2, date: CalendarDay(year: 2026, month: 2, day: 10)), // 第 2 轮今年读完
+        ]
+        let earliest = CalendarDay(year: 2026, month: 1, day: 1)
+        XCTAssertEqual(
+            ReadingStats.finishedCountSince(books: books, records: records, earliest: earliest),
+            1,
+            "以当前轮（第 2 轮）最后一条记录日期为准",
+        )
+    }
 }

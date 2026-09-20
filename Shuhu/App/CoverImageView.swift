@@ -1,23 +1,29 @@
 import SwiftUI
 
-/// 封面图组件：支持本地沙盒路径与 http(s) URL（同步来的封面是服务端引用的完整 URL）。
-/// 路径为空或加载失败时优雅降级为占位样式，不崩溃（票据 07）。
-/// 三处复用：主页卡片 58×78、详情页头部 92×124、表单预览。
+/// 封面图组件（odui 版）：path 为 nil 时降级为「书脊排印」占位（左缘墨线 + 竖排书名），
+/// 让没封面的书也像书架上的一员；支持本地沙盒路径与 http(s) URL（同步来的封面是完整 URL），
+/// 加载中/失败显示发丝线底色。
+/// 三处复用：主页书行 62×90、详情页头部 96×140、表单预览 84×122。
 struct CoverImageView: View {
     let path: String?
-    var width: CGFloat = 58
-    var height: CGFloat = 78
+    /// 无封面时书脊上的竖排书名。
+    var title: String = ""
+    var width: CGFloat = 62
+    var height: CGFloat = 90
+    var cornerRadius: CGFloat = 3
 
     @State private var localImage: UIImage?
 
     var body: some View {
         ZStack {
-            if let path, let url = Self.remoteURL(path) {
+            if path == nil {
+                BookSpine(title: title)
+            } else if let path, let url = Self.remoteURL(path) {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFill()
                     } else {
-                        placeholder
+                        loadingPlaceholder
                     }
                 }
             } else if let localImage {
@@ -25,24 +31,19 @@ struct CoverImageView: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                placeholder
+                loadingPlaceholder
             }
         }
         .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         .task(id: path) {
             localImage = Self.loadLocalImage(path)
         }
     }
 
-    private var placeholder: some View {
-        Rectangle()
-            .fill(Color.blue.opacity(0.10))
-            .overlay(
-                Text("书")
-                    .font(.title3)
-                    .foregroundStyle(.blue.opacity(0.5)),
-            )
+    /// 加载中/失败占位：发丝线底色（Android placeholder/error = Hairline）。
+    private var loadingPlaceholder: some View {
+        Rectangle().fill(Paper.hairline)
     }
 
     private static func remoteURL(_ path: String) -> URL? {

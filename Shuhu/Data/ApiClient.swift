@@ -78,6 +78,16 @@ public final class ApiClient: @unchecked Sendable {
         return try decode(data)
     }
 
+    public func put<Body: Encodable, T: Decodable>(
+        _ path: String,
+        body: Body,
+        timeout: TimeInterval? = nil,
+    ) async throws -> Envelope<T> {
+        let payload = try JSONEncoder().encode(body)
+        let (data, _) = try await send(path: path, method: "PUT", query: [], body: payload, contentType: "application/json", timeout: timeout)
+        return try decode(data)
+    }
+
     /// multipart 上传（封面）：单文件字段上传，返回服务端引用路径等业务数据。
     public func uploadMultipart<T: Decodable>(
         _ path: String,

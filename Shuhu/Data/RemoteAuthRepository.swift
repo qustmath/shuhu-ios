@@ -23,12 +23,55 @@ public struct SmsCodeRequest: Encodable, Sendable {
     public let scene: String
 }
 
+/// 未登录重置密码：短信验证后仅重设密码（服务端回登录态也不采纳，必须用新密码重新登录）。
+public struct ResetPasswordRequest: Encodable, Sendable {
+    public let phone: String
+    public let method: String
+    public let code: String
+    public let newPassword: String
+}
+
+/// 绑定/换绑手机号（已登录）：
+/// scene=bind_phone 验新号（phone+code）；scene=rebind_phone 双验证（oldCode 验旧号 + code 验新号）。
+public struct BindPhoneRequest: Encodable, Sendable {
+    public let method: String
+    public let scene: String
+    public let phone: String
+    public let code: String
+    public let oldCode: String?
+
+    public init(method: String, scene: String, phone: String, code: String, oldCode: String? = nil) {
+        self.method = method
+        self.scene = scene
+        self.phone = phone
+        self.code = code
+        self.oldCode = oldCode
+    }
+}
+
 public struct RefreshRequest: Encodable, Sendable {
     public let refreshToken: String
 }
 
 public struct LogoutRequest: Encodable, Sendable {
     public let refreshToken: String
+}
+
+/// 微信登录（channel=mobile_app；dev 联调时 code 为伪 code）。
+public struct WechatLoginRequest: Encodable, Sendable {
+    public let channel: String
+    public let code: String
+}
+
+/// 更新个人资料请求。avatar 为 nil 时序列化省略该字段（不动头像）；只改昵称传 nil。
+public struct UpdateProfileRequest: Encodable, Sendable {
+    public let nickname: String
+    public let avatar: String?
+
+    public init(nickname: String, avatar: String? = nil) {
+        self.nickname = nickname
+        self.avatar = avatar
+    }
 }
 
 /// 会员资料。微信注册的空壳账号 username/phone 为 JSON null，故均可空。
@@ -44,7 +87,7 @@ public struct MemberProfileData: Codable, Sendable {
     public let createdAt: String?
 }
 
-/// 登录/注册/刷新令牌的统一返回：令牌 + 最新会员资料。
+/// 登录/注册/刷新令牌/微信登录的统一返回：令牌 + 最新会员资料。
 public struct MemberLoginData: Codable, Sendable {
     public let accessToken: String
     public let refreshToken: String
@@ -110,9 +153,25 @@ public final class RemoteAuthRepository: AuthRepository, @unchecked Sendable {
         return saveLogin(data)
     }
 
+    public func resetPassword(phone: String, code: String, newPassword: String, method: String) async throws {
+        let envelope: Envelope<EmptyData> = try await publicClient.post(
+            "api/v1/member/password/reset",
+            body: ResetPasswordRequest(phone: phone, method: method, code: code, newPassword: newPassword),
+        )
+        // 只校验业务码：重置后不进入登录态，必须用新密码重新登录
+        try envelope.requireOk()
+    }
+
     public func login(phone: String, password: String) async throws -> AuthMember {
         let data: MemberLoginData = try await publicClient
             .post("api/v1/member/login", body: LoginRequest(phone: phone, password: password))
+            .requireData()
+        return saveLogin(data)
+    }
+
+    public func loginWithWechatDev(devCode: String) async throws -> AuthMember {
+        let data: MemberLoginData = try await publicClient
+            .post("api/v1/member/wechat/login", body: WechatLoginRequest(channel: "mobile_app", code: devCode))
             .requireData()
         return saveLogin(data)
     }
@@ -131,14 +190,70 @@ public final class RemoteAuthRepository: AuthRepository, @unchecked Sendable {
         session.send(nil)
     }
 
+    // ---- 已登录端点 ----
+
+    public func sendBindPhoneCode(phone: String, scene: String, method: String) async throws {
+        let envelope: Envelope<EmptyData> = try await memberClient.post(
+            "api/v1/member/phone/code",
+            body: SmsCodeRequest(phone: phone, method: method, scene: scene),
+        )
+        try envelope.requireOk()
+    }
+
+    public func bindPhone(phone: String, code: String, oldCode: String?, scene: String, method: String) async throws -> AuthMember {
+        let envelope: Envelope<EmptyData> = try await memberClient.post(
+            "api/v1/member/phone/bind",
+            body: BindPhoneRequest(method: method, scene: scene, phone: phone, code: code, oldCode: oldCode),
+        )
+        try envelope.requireOk()
+        // 绑定结果服务端不回数据，拉最新资料刷新登录态快照
+        return try await refreshProfile()
+    }
+
     public func refreshProfile() async throws -> AuthMember {
         let profile: MemberProfileData = try await memberClient
             .get("api/v1/member/me")
             .requireData()
-        let member = AuthMember(id: profile.id, phone: profile.phone ?? "", nickname: profile.nickname ?? "")
+        let member = AuthMember(profile: profile)
         tokenStore.saveProfile(member)
         session.send(member)
         return member
+    }
+
+    public func updateNickname(_ nickname: String) async throws -> AuthMember {
+        let trimmed = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw ApiError("昵称不能为空") }
+        let envelope: Envelope<EmptyData> = try await memberClient.put(
+            "api/v1/member/profile",
+            body: UpdateProfileRequest(nickname: trimmed),
+        )
+        try envelope.requireOk()
+        // 保存后拉最新资料刷新登录态快照
+        return try await refreshProfile()
+    }
+
+    public func updateAvatar(imageBytes: Data, ext: String) async throws -> AuthMember {
+        // 1) 复用封面上传通道把图片传到服务器，拿到相对路径
+        let uploaded: SyncCoverUploadData = try await memberClient
+            .uploadMultipart(
+                "api/v1/sync/covers",
+                fileField: "file",
+                filename: "avatar.\(ext)",
+                mimeType: "image/*",
+                bytes: imageBytes,
+            )
+            .requireData()
+        // 2) 把服务器路径写入资料（nickname 用当前昵称，避免被清空）
+        let currentNickname = session.value?.nickname ?? ""
+        let envelope: Envelope<EmptyData> = try await memberClient.put(
+            "api/v1/member/profile",
+            body: UpdateProfileRequest(
+                nickname: currentNickname.isEmpty ? "书友" : currentNickname,
+                avatar: uploaded.path,
+            ),
+        )
+        try envelope.requireOk()
+        return try await refreshProfile()
     }
 
     /// 认证器回调：用 refresh token 换新令牌（旋转：旧 refresh 用后即废）。
@@ -179,7 +294,7 @@ public final class RemoteAuthRepository: AuthRepository, @unchecked Sendable {
 
     @discardableResult
     private func saveLogin(_ data: MemberLoginData) -> AuthMember {
-        let member = AuthMember(id: data.member.id, phone: data.member.phone ?? "", nickname: data.member.nickname ?? "")
+        let member = AuthMember(profile: data.member)
         tokenStore.save(
             tokens: TokenStore.Tokens(accessToken: data.accessToken, refreshToken: data.refreshToken),
             member: member,
@@ -189,5 +304,18 @@ public final class RemoteAuthRepository: AuthRepository, @unchecked Sendable {
         lock.unlock()
         session.send(member)
         return member
+    }
+}
+
+private extension AuthMember {
+    init(profile: MemberProfileData) {
+        self.init(
+            id: profile.id,
+            phone: profile.phone ?? "",
+            nickname: profile.nickname ?? "",
+            avatar: profile.avatar ?? "",
+            level: profile.level ?? 0,
+            expireAt: profile.expireAt,
+        )
     }
 }

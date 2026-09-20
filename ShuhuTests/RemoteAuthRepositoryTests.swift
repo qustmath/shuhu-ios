@@ -156,4 +156,163 @@ final class RemoteAuthRepositoryTests: XCTestCase {
         XCTAssertNil(auth.currentAccessToken())
         XCTAssertNil(tokenStore.tokens())
     }
+
+    // ---- 重置密码（不自动登录）----
+
+    func testResetPassword_doesNotEnterSession() async throws {
+        MockURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/member/password/reset")
+            XCTAssertEqual(request.httpMethod, "POST")
+            // 服务端回登录态也不采纳：必须用新密码重新登录
+            return TestResponses.ok(self.loginData(access: "acc-x", refresh: "ref-x"))
+        }
+
+        try await auth.resetPassword(phone: "13800000001", code: "123456", newPassword: "new-secret", method: "sms")
+
+        XCTAssertNil(auth.session.value, "重置密码后不进入登录态")
+        XCTAssertNil(tokenStore.tokens(), "本地不落任何令牌")
+    }
+
+    // ---- 微信 dev 登录（开发联调）----
+
+    func testLoginWithWechatDev_savesSession() async throws {
+        MockURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/member/wechat/login")
+            return TestResponses.ok(MemberLoginData(
+                accessToken: "acc-w", refreshToken: "ref-w", expiresIn: 3600,
+                member: MemberProfileData(
+                    id: 8, username: nil, phone: nil, nickname: "微信书友",
+                    avatar: nil, invitationCode: nil, level: nil, expireAt: nil, createdAt: nil,
+                ),
+            ))
+        }
+
+        let member = try await auth.loginWithWechatDev(devCode: "dev:ios")
+
+        XCTAssertEqual(member.id, 8)
+        XCTAssertEqual(auth.session.value?.id, 8)
+        XCTAssertEqual(auth.currentAccessToken(), "acc-w")
+    }
+
+    // ---- 绑定手机号（成功后刷新登录态快照）----
+
+    func testBindPhone_success_refreshesSessionSnapshot() async throws {
+        MockURLProtocol.handler = { _ in
+            TestResponses.ok(MemberLoginData(
+                accessToken: "acc-1", refreshToken: "ref-1", expiresIn: 3600,
+                member: MemberProfileData(
+                    id: 5, username: nil, phone: nil, nickname: "书友",
+                    avatar: nil, invitationCode: nil, level: nil, expireAt: nil, createdAt: nil,
+                ),
+            ))
+        }
+        _ = try await auth.loginWithWechatDev(devCode: "dev:ios")
+
+        var paths: [String] = []
+        MockURLProtocol.handler = { request in
+            paths.append(request.url?.path ?? "")
+            switch request.url?.path {
+            case "/api/v1/member/phone/bind":
+                return TestResponses.okEmpty()
+            case "/api/v1/member/me":
+                return TestResponses.ok(MemberProfileData(
+                    id: 5, username: nil, phone: "13800000001", nickname: "书友",
+                    avatar: nil, invitationCode: nil, level: nil, expireAt: nil, createdAt: nil,
+                ))
+            default:
+                return TestResponses.businessError(code: 404, message: "not found")
+            }
+        }
+
+        let member = try await auth.bindPhone(
+            phone: "13800000001", code: "123456", oldCode: nil, scene: "bind_phone", method: "sms",
+        )
+
+        XCTAssertEqual(member.phone, "13800000001")
+        XCTAssertEqual(auth.session.value?.phone, "13800000001")
+        XCTAssertEqual(paths, ["/api/v1/member/phone/bind", "/api/v1/member/me"], "绑定后拉最新资料刷新快照")
+    }
+
+    // ---- 改昵称（PUT 资料 + 刷新快照）----
+
+    func testUpdateNickname_putsProfileThenRefreshes() async throws {
+        MockURLProtocol.handler = { _ in
+            TestResponses.ok(self.loginData(access: "acc-1", refresh: "ref-1"))
+        }
+        _ = try await auth.login(phone: "13800000001", password: "secret")
+
+        var paths: [String] = []
+        MockURLProtocol.handler = { request in
+            paths.append("\(request.httpMethod) \(request.url?.path ?? "")")
+            switch (request.httpMethod, request.url?.path) {
+            case ("PUT", "/api/v1/member/profile"):
+                let body = try? JSONSerialization.jsonObject(with: request.bodyData ?? Data()) as? [String: Any]
+                XCTAssertEqual(body?["nickname"] as? String, "新昵称")
+                XCTAssertNil(body?["avatar"], "只改昵称不动头像（字段序列化省略）")
+                return TestResponses.okEmpty()
+            case ("GET", "/api/v1/member/me"):
+                return TestResponses.ok(MemberProfileData(
+                    id: 5, username: nil, phone: "13800000001", nickname: "新昵称",
+                    avatar: nil, invitationCode: nil, level: nil, expireAt: nil, createdAt: nil,
+                ))
+            default:
+                return TestResponses.businessError(code: 404, message: "not found")
+            }
+        }
+
+        let member = try await auth.updateNickname("新昵称")
+
+        XCTAssertEqual(member.nickname, "新昵称")
+        XCTAssertEqual(paths, ["PUT /api/v1/member/profile", "GET /api/v1/member/me"])
+    }
+
+    func testUpdateNickname_blankRejected() async throws {
+        do {
+            _ = try await auth.updateNickname("   ")
+            XCTFail("空昵称应拒绝")
+        } catch let error as ApiError {
+            XCTAssertEqual(error.message, "昵称不能为空")
+        }
+    }
+
+    // ---- 上传头像（封面上传通道 → 写资料 → 刷新快照）----
+
+    func testUpdateAvatar_uploadsWritesProfileThenRefreshes() async throws {
+        MockURLProtocol.handler = { _ in
+            TestResponses.ok(MemberLoginData(
+                accessToken: "acc-1", refreshToken: "ref-1", expiresIn: 3600,
+                member: MemberProfileData(
+                    id: 5, username: nil, phone: nil, nickname: nil,
+                    avatar: nil, invitationCode: nil, level: nil, expireAt: nil, createdAt: nil,
+                ),
+            ))
+        }
+        _ = try await auth.loginWithWechatDev(devCode: "dev:ios")
+
+        var paths: [String] = []
+        MockURLProtocol.handler = { request in
+            paths.append("\(request.httpMethod) \(request.url?.path ?? "")")
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/api/v1/sync/covers"):
+                return TestResponses.ok(SyncCoverUploadData(path: "/static/covers/abc.jpg"))
+            case ("PUT", "/api/v1/member/profile"):
+                let body = try? JSONSerialization.jsonObject(with: request.bodyData ?? Data()) as? [String: Any]
+                XCTAssertEqual(body?["nickname"] as? String, "书友", "昵称为空时兜底，避免被清空")
+                XCTAssertEqual(body?["avatar"] as? String, "/static/covers/abc.jpg")
+                return TestResponses.okEmpty()
+            case ("GET", "/api/v1/member/me"):
+                return TestResponses.ok(MemberProfileData(
+                    id: 5, username: nil, phone: nil, nickname: "书友",
+                    avatar: "/static/covers/abc.jpg", invitationCode: nil, level: nil, expireAt: nil, createdAt: nil,
+                ))
+            default:
+                return TestResponses.businessError(code: 404, message: "not found")
+            }
+        }
+
+        let member = try await auth.updateAvatar(imageBytes: Data([1, 2, 3]), ext: "jpg")
+
+        XCTAssertEqual(member.avatar, "/static/covers/abc.jpg")
+        XCTAssertEqual(paths, ["POST /api/v1/sync/covers", "PUT /api/v1/member/profile", "GET /api/v1/member/me"])
+    }
 }

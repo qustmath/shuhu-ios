@@ -42,6 +42,8 @@ public struct AdReportRequest: Codable, Sendable {
 public enum AdSlots {
     public static let splash = "splash"
     public static let homeListBottom = "home_list_bottom"
+    /// 详情页第 2 条记录后内联卡（odui 改版新增）。
+    public static let detailRecordsInline = "detail_records_inline"
 }
 
 /// 广告客户端（advertising 票 04/05 共享）：拉取生效素材 + 曝光/点击上报。

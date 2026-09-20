@@ -100,3 +100,22 @@ public extension CalendarDay {
         try container.encode(iso)
     }
 }
+
+/// `Date`（本地时区）↔ `CalendarDay`（用户视角日历日）：DatePicker 回填与取回共用。
+public extension CalendarDay {
+    init(date: Date, timeZone: TimeZone = .current) {
+        self = CalendarDay.today(now: date, timeZone: timeZone)
+    }
+
+    /// 设备时区当日正午（任何时区的日界变化都不影响回填到同一天）。
+    func toDate(timeZone: TimeZone = .current) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        var comps = DateComponents()
+        comps.year = year
+        comps.month = month
+        comps.day = day
+        comps.hour = 12
+        return calendar.date(from: comps)!
+    }
+}
