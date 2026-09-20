@@ -42,7 +42,7 @@ final class MembershipClientTests: XCTestCase {
         XCTAssertEqual(plans[0].tagLabel, "推荐")
     }
 
-    func testPlans_businessError_throwsServerMessage() async {
+    func testPlans_businessError_throwsServerMessage() async throws {
         MockURLProtocol.handler = { _ in
             TestResponses.businessError(code: 401, message: "登录失效，请重新登录")
         }
@@ -67,7 +67,7 @@ final class MembershipClientTests: XCTestCase {
         XCTAssertNil(data.expireAt, "终身买断无到期时间")
     }
 
-    func testPurchase_planUnavailable_throwsServerMessage() async {
+    func testPurchase_planUnavailable_throwsServerMessage() async throws {
         MockURLProtocol.handler = { _ in
             TestResponses.businessError(code: 400, message: "套餐不存在或已下架")
         }
