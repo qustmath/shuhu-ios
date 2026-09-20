@@ -15,6 +15,14 @@ curl -X POST -H "Authorization: Bearer <PAT>" \
   -d '{"ref":"master","inputs":{"changelog":"本次测试内容"}}'
 ```
 
+**开发机（Ubuntu）专用通道——推标签触发**（本机到 github.com / dispatches API 均不通，
+SSH 推 git 标签可用）：
+
+```bash
+git tag release-1.1-20260920 && git push origin release-1.1-20260920
+# 标签推上即触发 Release workflow（匹配 release-* 模式）
+```
+
 **关键铁律：workflow 绿 ≠ 构建入库。** 上传完成后必须用 ASC REST 复核
 （见「验证构建」），处理完成后 TestFlight 页构建状态应为 VALID。
 

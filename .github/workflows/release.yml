@@ -5,6 +5,12 @@ name: Release (TestFlight)
 # 证书 = 分发证书 p12（secret DIST_*），描述文件 = "Shufu App Store"（ASC API 预创建）。
 # Secrets：ASC_KEY_ID / ASC_KEY_ISSUER_ID / ASC_KEY_P8_B64（pilot 上传用），
 #          DIST_P12_B64 / DIST_P12_PASSWORD / DIST_PROFILE_B64（签名用）。
+#
+# 两种触发方式：
+# 1. 手动：GitHub → Actions → Run workflow（或 PAT 调 dispatches）。
+# 2. 推标签：git tag release-<版本>-<日期> && git push origin <tag> ——
+#    开发机网络到 github.com / dispatches API 均不通（仅 api.github.com 只读可用），
+#    SSH 推标签是唯一可靠的本机触发通道。
 on:
   workflow_dispatch:
     inputs:
@@ -12,6 +18,9 @@ on:
         description: 本包测试内容（TestFlight 展示给测试员）
         required: false
         default: ''
+  push:
+    tags:
+      - 'release-*'
 
 jobs:
   testflight:
