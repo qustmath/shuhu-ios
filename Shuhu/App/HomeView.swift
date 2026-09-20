@@ -309,6 +309,11 @@ struct HomeView: View {
         )
         .offset(y: draggingId == item.id ? dragOffsetY : 0)
         .zIndex(draggingId == item.id ? 1 : 0)
+        // 被拖行的换位布局跳变不做动画：布局位置与 offset 同帧反向抵消，视觉才连续；
+        // 其余行保持 withAnimation 滑入空位。
+        .transaction { tx in
+            if draggingId == item.id { tx.animation = nil }
+        }
         .gesture(dragGesture(for: item), including: draggable ? .all : .subviews)
     }
 
@@ -405,8 +410,11 @@ struct HomeView: View {
             return
         }
         let orderedIds = order.map(\.book.id) + finished.map(\.book.id)
-        draggingId = nil
-        dragOffsetY = 0
+        // 松手平滑回位：draggingId 一清，被拖行的 .transaction 恢复，此动画生效
+        withAnimation(.easeOut(duration: 0.15)) {
+            draggingId = nil
+            dragOffsetY = 0
+        }
         Task {
             try? await repository.updateBookSortOrder(orderedIds)
             await reloadBooks()
