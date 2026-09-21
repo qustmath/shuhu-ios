@@ -55,20 +55,29 @@ struct HomeView: View {
     @State private var showMembership = false
     @SceneStorage("home.finishedExpanded") private var finishedExpanded = false
 
-    // ---- 拖动排序 ----
+    // ---- 拖动排序（拖动期布局冻结，只做视觉位移；松手才落库）----
+    /// 拖动期冻结的布局顺序（= 拖动开始时的 reading）：换位不改布局，只改各行的 offset。
+    @State private var frozenOrder: [HomeBookUi]?
+    /// 被拖书籍 id。
     @State private var draggingId: Int64?
+    /// 手指位移（shelf 坐标，相对冻结槽位）。绝对量、不做补偿累减——换位判定是它的纯函数。
     @State private var dragOffsetY: CGFloat = 0
+    /// 当前视觉顺序（松手提交这一个）。
+    @State private var dragOrder: [HomeBookUi]?
     @State private var lastDragTranslation: CGFloat = 0
     @State private var localOrder: [HomeBookUi]?
     @State private var adRowHeight: CGFloat = 0
 
+    /// 拖动测量用的命名坐标空间（定义在 ScrollView 上）：视口坐标系，不随行的槽位移动，
+    /// 故 `DragGesture.translation` 不会被换位/动画/重锚定污染（旧实现在行的局部坐标系里量，被污染后自激振荡）。
+    private static let shelfSpace = "shelf"
+
     /// 书行高度：封面 90 + 纵向 padding 20×2 + 下发丝线 1（与 Android 实测一致）。
     private static let bookRowHeight: CGFloat = 131
 
-    /// 换位阈值的滞回量（pt）：正向换位要越过 `step/2 + 本值`，反向要越过 `-step/2 - 本值`。
+    /// 换位阈值的滞回量（pt）：越过「相邻两槽位中线 + 本值」才换过去，要换回来得越过「中线 − 本值」。
     ///
-    /// 少了它滞回带宽度为 0：换位后 `dragOffsetY -= step` 恰好把余量停在**反向阈值**上，
-    /// 于是指尖在玻璃上不可避免的抖动（±1~2pt）会让同一对行以每秒十余次来回换位——
+    /// 少了它就没有死区，指尖在玻璃上不可避免的抖动（±1~2pt）会把同一对行来回翻转——
     /// 现象就是「拖动排序时上下跳动」（实测录屏：手指停在 y≈700 不动，2.2 秒内翻 14 次）。
     /// 12pt ≈ 0.09 行，感知不到，但远大于指尖抖动幅度。
     private static let swapThresholdHysteresis: CGFloat = 12
@@ -122,8 +131,12 @@ struct HomeView: View {
     private var reading: [HomeBookUi] { items.filter { !$0.isFinished } }
     private var finished: [HomeBookUi] { items.filter { $0.isFinished } }
 
-    /// 列表顺序的唯一数据源：默认用仓库实时值，只有拖动期（及落库回灌前）用本地顺序覆盖。
-    private var displayReading: [HomeBookUi] { localOrder ?? reading }
+    /// 列表渲染顺序的唯一数据源：拖动期用冻结顺序（布局不动，换位只靠 offset），
+    /// 落库回灌前用本地顺序，其余用仓库实时值。
+    private var displayReading: [HomeBookUi] {
+        if draggingId != nil, let frozenOrder { return frozenOrder }
+        return localOrder ?? reading
+    }
 
     private var ready: Bool { booksLoaded && adsLoaded }
 
@@ -297,7 +310,7 @@ struct HomeView: View {
                     )
                     if finishedExpanded {
                         ForEach(finished) { item in
-                            bookRow(item, draggable: false)
+                            bookRow(item)
                         }
                     }
                     Spacer().frame(height: 24)
@@ -306,30 +319,36 @@ struct HomeView: View {
                 Spacer().frame(height: 110) // 底部留出 FAB 空间
             }
         }
-        .coordinateSpace(name: "shelf")
+        .coordinateSpace(name: Self.shelfSpace)
         .scrollIndicators(.hidden)
+        // 起拖后冻结滚动：长按已经在原地按住 0.35s，此时没有滚动在飞，关掉最干净。
+        // 平时不关——行的拖动识别只做 simultaneousGesture，滚动照旧优先（旧实现用 .gesture 抢走了整屏滚动）。
+        .scrollDisabled(draggingId != nil)
     }
 
-    private func bookRow(_ item: HomeBookUi, draggable: Bool = true) -> some View {
+    private func bookRow(_ item: HomeBookUi) -> some View {
         BookRow(
             item: item,
             onTap: { navPath.append(.book(item.book)) },
         )
-        .offset(y: draggingId == item.id ? dragOffsetY : 0)
-        .zIndex(draggingId == item.id ? 1 : 0)
-        // 被拖行的换位布局跳变不做动画：布局位置与 offset 同帧反向抵消，视觉才连续；
-        // 其余行保持 withAnimation 滑入空位。
+        .offset(y: visualOffset(item))
+        .zIndex(draggingId == item.book.id ? 1 : 0)
+        // 被拖行必须严格跟手：拖动期它的位移不参与任何动画（换位动画只给让位的行）。
+        // 松手那一帧 draggingId 已清，这里的覆写不再命中，落位动画正常生效。
         .transaction { tx in
-            if draggingId == item.id { tx.animation = nil }
+            if draggingId == item.book.id { tx.animation = nil }
         }
-        .gesture(dragGesture(for: item), including: draggable ? .all : .subviews)
+        // simultaneousGesture（而非 gesture）：子视图的拖动识别不再抢走 ScrollView 的滚动，
+        // 整屏都能正常上下滑（旧实现用 .gesture，于是只有广告那块能滑）。起拖后由 scrollDisabled 冻结滚动。
+        // 已读完分区照样挂着识别器：`beginDrag` 只认 reading 里的书，长按已读完行不会起拖。
+        .simultaneousGesture(dragGesture(for: item), including: .all)
     }
 
     // ---- 拖动排序（长按书籍行上下拖动，松手持久化到仓库）----
 
     private func dragGesture(for item: HomeBookUi) -> some Gesture {
         LongPressGesture(minimumDuration: 0.35)
-            .sequenced(before: DragGesture(minimumDistance: 0))
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.shelfSpace)))
             .onChanged { value in
                 switch value {
                 case .first(true):
@@ -344,90 +363,98 @@ struct HomeView: View {
     }
 
     private func beginDrag(_ item: HomeBookUi) {
-        guard draggingId == nil else { return }
-        draggingId = item.id
-        localOrder = reading
+        guard draggingId == nil, frozenOrder == nil else { return }
+        guard reading.contains(where: { $0.book.id == item.book.id }) else { return }
+        // 冻结布局：拖动期只改 offset，不动列表顺序（列表顺序一动，LazyVStack 会重锚定、坐标系会跳）
+        frozenOrder = reading
+        dragOrder = reading
+        draggingId = item.book.id
         dragOffsetY = 0
         lastDragTranslation = 0
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
 
-    /// 各槽位的静止中线（拖动度量用）：书行 131pt；广告用实测高（未测到按宽高比估算）。
-    private func displaySlotMids() -> [String: CGFloat] {
-        var mids: [String: CGFloat] = [:]
-        var top: CGFloat = 0
-        let adHeight = adRowHeight > 0
-            ? adRowHeight
-            : (UIScreen.main.bounds.width - 44) * (480 / 1344) + 34
-        for entry in displayList {
-            let height: CGFloat
-            switch entry {
-            case .book: height = Self.bookRowHeight
-            case .ad: height = adHeight
-            }
-            mids[entry.id] = top + height / 2
-            top += height
-        }
-        return mids
+    // ---- 拖动度量：槽位几何 + 视觉位移（拖动期布局冻结，故这份几何全程不变）----
+
+    /// 广告当前是否占一个槽位（被关掉/没素材/列表为空时不占）。
+    private var adPresent: Bool { inlineAd != nil && !adClosed && !displayReading.isEmpty }
+
+    /// 广告行高：实测优先（含行内 padding），未测到按素材宽高比估算。
+    private var adHeight: CGFloat {
+        adRowHeight > 0 ? adRowHeight : (UIScreen.main.bounds.width - 44) * (480 / 1344) + 34
     }
 
-    /// 换位 = 两个槽位互换内容，步长按「目标槽位 − 被拖槽位」实测：
-    /// 广告卡夹在第 2、3 本之间时上下步长不等（对齐 Android 算法）。
-    ///
-    /// 两侧阈值都带 [`swapThresholdHysteresis`] 滞回：不留余量的话换位后余量正好落在反向阈值上，
-    /// 指尖微抖就会把同一对行来回翻转（见该常量的说明）。
+    /// 槽位中线（显示序）：书行 131pt，广告用实测高。
+    private var slotMids: [CGFloat] {
+        HomeReorder.slotMids(
+            bookCount: displayReading.count,
+            bookRowHeight: Self.bookRowHeight,
+            adHeight: adHeight,
+            hasAd: adPresent,
+        )
+    }
+
+    private func slotMid(bookIndex: Int, bookCount: Int) -> CGFloat {
+        let slot = HomeReorder.slotOfBook(bookIndex, bookCount: bookCount, hasAd: adPresent)
+        return slot < slotMids.count ? slotMids[slot] : 0
+    }
+
+    /// 行的视觉位移：布局冻结不动，靠 offset 把行摆到它在「当前视觉顺序」里的槽位。
+    /// 被拖行的位移就是手指位移本身（不做任何补偿），故同一手指位置必得同一顺序，不可能自激换位。
+    private func visualOffset(_ item: HomeBookUi) -> CGFloat {
+        guard let draggingId, let frozen = frozenOrder, let order = dragOrder else { return 0 }
+        if item.book.id == draggingId { return dragOffsetY }
+        guard let oldIndex = frozen.firstIndex(where: { $0.book.id == item.book.id }),
+              let newIndex = order.firstIndex(where: { $0.book.id == item.book.id })
+        else { return 0 }
+        return slotMid(bookIndex: newIndex, bookCount: order.count)
+            - slotMid(bookIndex: oldIndex, bookCount: frozen.count)
+    }
+
+    /// 换位 = 改「哪个槽位放哪本书」，槽位本身不动（广告固定占第 3 个显示位，跨它时步长自动变大）。
+    /// 阈值与滞回见 [`HomeReorder.targetBookIndex`] / [`swapThresholdHysteresis`]。
     private func updateDrag(_ item: HomeBookUi, translation: CGFloat) {
-        guard draggingId == item.id, var order = localOrder,
-              var index = order.firstIndex(where: { $0.id == item.id }) else { return }
+        guard let frozen = frozenOrder, let order = dragOrder,
+              draggingId == item.book.id,
+              let bookIndex = frozen.firstIndex(where: { $0.book.id == item.book.id }),
+              let currentIndex = order.firstIndex(where: { $0.book.id == item.book.id })
+        else { return }
         dragOffsetY += translation - lastDragTranslation
         lastDragTranslation = translation
 
-        let mids = displaySlotMids()
-        func slotMid(_ entry: HomeBookUi) -> CGFloat {
-            mids["book-\(entry.id)"] ?? 0
-        }
-
-        var slot = slotMid(order[index])
-        var swapped = false
-        while index < order.count - 1 {
-            let step = slotMid(order[index + 1]) - slot
-            guard step > 0, dragOffsetY > step / 2 + Self.swapThresholdHysteresis else { break }
-            order.swapAt(index, index + 1)
-            dragOffsetY -= step
-            slot += step
-            swapped = true
-            index += 1
-        }
-        while index > 0 {
-            let step = slot - slotMid(order[index - 1])
-            guard step > 0, dragOffsetY < -step / 2 - Self.swapThresholdHysteresis else { break }
-            order.swapAt(index, index - 1)
-            dragOffsetY += step
-            slot -= step
-            swapped = true
-            index -= 1
-        }
-        if swapped {
-            // 跟手换位：仅换位动画化，拖动位移保持即时
-            withAnimation(.easeInOut(duration: 0.18)) {
-                localOrder = order
-            }
+        let target = HomeReorder.targetBookIndex(
+            current: currentIndex,
+            fromBookIndex: bookIndex,
+            bookCount: frozen.count,
+            mids: slotMids,
+            hasAd: adPresent,
+            offsetY: dragOffsetY,
+            hysteresis: Self.swapThresholdHysteresis,
+        )
+        guard target != currentIndex else { return }
+        // 让位动画：只有换位这一帧的槽位变化动画化；被拖行的位移始终即时（bookRow 的 transaction 覆写）
+        withAnimation(.easeInOut(duration: 0.18)) {
+            dragOrder = HomeReorder.moved(order, from: currentIndex, to: target)
         }
     }
 
     private func endDrag() {
-        guard draggingId != nil, let order = localOrder else {
+        guard let order = dragOrder, draggingId != nil else {
             resetDrag()
             return
         }
-        let orderedIds = order.map(\.book.id) + finished.map(\.book.id)
-        // 松手平滑回位：draggingId 一清，被拖行的 .transaction 恢复，此动画生效
-        withAnimation(.easeOut(duration: 0.15)) {
+        // 松手落位：布局切到视觉顺序 + 位移归零，两者同帧、同曲线动画，且位移量正好等于槽位差——
+        // 于是让位过的行原地不动，被拖行从手指位置平滑滑进目标槽位。
+        withAnimation(.easeOut(duration: 0.18)) {
             draggingId = nil
             dragOffsetY = 0
+            frozenOrder = nil
+            dragOrder = nil
+            localOrder = order
         }
+        lastDragTranslation = 0
         Task {
-            try? await repository.updateBookSortOrder(orderedIds)
+            try? await repository.updateBookSortOrder(order.map(\.book.id) + finished.map(\.book.id))
             await reloadBooks()
             // 落库回灌完成后交回仓库顺序（避免闪回旧顺序）
             localOrder = nil
@@ -438,6 +465,8 @@ struct HomeView: View {
         draggingId = nil
         dragOffsetY = 0
         lastDragTranslation = 0
+        frozenOrder = nil
+        dragOrder = nil
     }
 
     // ---- 悬浮按钮（本屏唯一的赭红大色块）----
