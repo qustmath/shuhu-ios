@@ -73,6 +73,23 @@ final class HomeShelfUITests: XCTestCase {
         )
     }
 
+    /// 真机反馈（build 20）：在书行上「按住 → 松手」之后整屏都滑不动了
+    /// （拖动状态泄漏 + `.scrollDisabled(draggingId != nil)` 是全局锁，锁上就再没解开）。
+    /// 现在起拖与滚动由 UIKit 识别器仲裁、没有任何全局锁：这一串动作之后必须还能滑。
+    func testShelfStillScrollsAfterLongPressRelease() {
+        let app = launchSeeded()
+        row(app, 2).press(forDuration: 1.2) // 长按起拖，然后原样松手
+        Thread.sleep(forTimeInterval: 0.6)
+
+        let before = minY(row(app, 2))!
+        swipe(row(app, 2), dy: -160)
+
+        XCTAssertTrue(
+            waitUntil { (self.minY(self.row(app, 2)) ?? .infinity) < before - 40 },
+            "长按松手之后列表滑不动了（拖动状态泄漏 / 有全局锁）",
+        )
+    }
+
     // MARK: - 长按拖动排序
 
     /// 长按拖动：把第 1 本拖到第 2 本之后，顺序必须真的变成 2、1、3…（而不是原地弹回或来回乱跳）。

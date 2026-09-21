@@ -349,8 +349,10 @@ struct HomeView: View {
 
     /// 起拖：命中判定已由识别器做过（`bookIndex(atContentY:)`），这里只负责立状态。
     private func beginDrag(atContentY y: CGFloat) {
-        guard draggingId == nil, frozenOrder == nil else { return }
         guard let index = bookIndex(atContentY: y) else { return }
+        // 兜底自愈：上一次拖动若因任何原因没收到收尾回调（识别器被重建、目标被释放……），
+        // 这里先清干净再起新的——拖动状态绝不能永久残留（build 20 真机就是被残留状态锁死的）。
+        if draggingId != nil || frozenOrder != nil { resetDrag() }
         // 冻结布局：拖动期只改 offset，不动列表顺序（列表顺序一动，LazyVStack 会重锚定、几何会跳）
         frozenOrder = reading
         dragOrder = reading
