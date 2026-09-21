@@ -65,6 +65,14 @@ struct HomeView: View {
     /// 书行高度：封面 90 + 纵向 padding 20×2 + 下发丝线 1（与 Android 实测一致）。
     private static let bookRowHeight: CGFloat = 131
 
+    /// 换位阈值的滞回量（pt）：正向换位要越过 `step/2 + 本值`，反向要越过 `-step/2 - 本值`。
+    ///
+    /// 少了它滞回带宽度为 0：换位后 `dragOffsetY -= step` 恰好把余量停在**反向阈值**上，
+    /// 于是指尖在玻璃上不可避免的抖动（±1~2pt）会让同一对行以每秒十余次来回换位——
+    /// 现象就是「拖动排序时上下跳动」（实测录屏：手指停在 y≈700 不动，2.2 秒内翻 14 次）。
+    /// 12pt ≈ 0.09 行，感知不到，但远大于指尖抖动幅度。
+    private static let swapThresholdHysteresis: CGFloat = 12
+
     init(
         repository: any LibraryRepository,
         auth: any AuthRepository,
@@ -365,6 +373,9 @@ struct HomeView: View {
 
     /// 换位 = 两个槽位互换内容，步长按「目标槽位 − 被拖槽位」实测：
     /// 广告卡夹在第 2、3 本之间时上下步长不等（对齐 Android 算法）。
+    ///
+    /// 两侧阈值都带 [`swapThresholdHysteresis`] 滞回：不留余量的话换位后余量正好落在反向阈值上，
+    /// 指尖微抖就会把同一对行来回翻转（见该常量的说明）。
     private func updateDrag(_ item: HomeBookUi, translation: CGFloat) {
         guard draggingId == item.id, var order = localOrder,
               var index = order.firstIndex(where: { $0.id == item.id }) else { return }
@@ -380,7 +391,7 @@ struct HomeView: View {
         var swapped = false
         while index < order.count - 1 {
             let step = slotMid(order[index + 1]) - slot
-            guard step > 0, dragOffsetY > step / 2 else { break }
+            guard step > 0, dragOffsetY > step / 2 + Self.swapThresholdHysteresis else { break }
             order.swapAt(index, index + 1)
             dragOffsetY -= step
             slot += step
@@ -389,7 +400,7 @@ struct HomeView: View {
         }
         while index > 0 {
             let step = slot - slotMid(order[index - 1])
-            guard step > 0, dragOffsetY < -step / 2 else { break }
+            guard step > 0, dragOffsetY < -step / 2 - Self.swapThresholdHysteresis else { break }
             order.swapAt(index, index - 1)
             dragOffsetY += step
             slot -= step
