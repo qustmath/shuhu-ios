@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 // ---- 同步契约 v1 的 DTO（与 shared/sync-api-v1.yaml 一致，镜像 Android `SyncDtos`）----
 
@@ -119,14 +120,17 @@ public struct SyncCoverUploadData: Codable, Sendable {
 // ---- DTO ↔ 领域模型映射（镜像 Android SyncEngine 的私有扩展）----
 
 public extension SyncBookChange {
+    /// 远端书籍 → 领域模型。日期缺失/非法时**按未设置处理并记日志**（与 Android
+    /// `parseIsoDateOrNull` 同义）：一本书的日期坏了不该让它整行消失，
+    /// 保留书名/页数/记录，用户重新设置计划即可恢复。
     func toDomain() -> Book {
         Book(
             id: 0,
             title: title ?? "",
             author: author ?? "",
             totalPages: totalPages ?? 0,
-            startDate: startDate.flatMap(CalendarDay.init(iso:)),
-            endDate: endDate.flatMap(CalendarDay.init(iso:)),
+            startDate: Self.parseDay(startDate, guid: guid, field: "startDate"),
+            endDate: Self.parseDay(endDate, guid: guid, field: "endDate"),
             currentRound: currentRound ?? 1,
             coverImagePath: coverImagePath,
             sortOrder: sortOrder ?? 0,
@@ -134,6 +138,16 @@ public extension SyncBookChange {
             updatedAt: updatedAt,
             deletedAt: deletedAt,
         )
+    }
+
+    private static func parseDay(_ raw: String?, guid: String, field: String) -> CalendarDay? {
+        guard let raw, !raw.isEmpty else { return nil }
+        guard let day = CalendarDay(iso: raw) else {
+            Logger(subsystem: "ink.groovy.shuhu", category: "sync")
+                .warning("远端书籍日期非法，按未设置处理：guid=\(guid, privacy: .public) \(field, privacy: .public)=\(raw, privacy: .public)")
+            return nil
+        }
+        return day
     }
 
     static func from(_ book: Book) -> SyncBookChange {

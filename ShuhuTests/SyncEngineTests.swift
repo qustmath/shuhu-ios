@@ -278,6 +278,44 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertTrue(store.pendingPullRecords().isEmpty, "补上后清空待落库队列")
     }
 
+    /// 远端记录日期非法：只丢这一条，不得让整轮同步失败。
+    /// 远端书籍日期非法：按未设置处理，保留书名/页数与记录（不得整行消失）。
+    func testBadDates_skipBadRecord_andDegradeBadBookDates() async throws {
+        MockURLProtocol.handler = { request in
+            switch request.url?.path {
+            case "/api/v1/sync/push":
+                return TestResponses.ok(SyncPushData(cursor: "p-cursor", results: []))
+            case "/api/v1/sync/pull":
+                return TestResponses.ok(SyncPullData(
+                    cursor: "20.2", hasMore: false,
+                    books: [SyncBookChange(guid: "g-book", title: "载体", author: "", totalPages: 100,
+                                           startDate: "2026-13-45", endDate: "bad",
+                                           currentRound: 1, sortOrder: 1, updatedAt: 100, deletedAt: nil)],
+                    records: [
+                        SyncRecordChange(guid: "r-good", bookGuid: "g-book", date: "2026-09-09",
+                                         createdAt: 10, pageReached: 42, round: 1, updatedAt: 100),
+                        SyncRecordChange(guid: "r-bad", bookGuid: "g-book", date: "09/09/2026",
+                                         createdAt: 20, pageReached: 7, round: 1, updatedAt: 200),
+                    ],
+                ))
+            default:
+                return TestResponses.okEmpty()
+            }
+        }
+        session.send(member())
+
+        let ok = await engine.syncNow()
+        XCTAssertTrue(ok, "坏日期不得让整轮同步失败")
+
+        let book = try await repository.bookByGuid(guid: "g-book")
+        let bookId = try XCTUnwrap(book?.id)
+        XCTAssertNil(book?.startDate, "非法开始日期降级为未设置")
+        XCTAssertNil(book?.endDate)
+        XCTAssertEqual(book?.title, "载体", "书籍其余字段照常保留，不得整行消失")
+        XCTAssertEqual(try await repository.records(bookId: bookId).map(\.pageReached), [42], "坏日期记录被跳过")
+        XCTAssertEqual(store.cursor(), "20.2", "坏日期记录不阻塞游标推进")
+    }
+
     /// 孤儿记录（挂靠的书在云端不存在）不得让整轮同步失败：记日志丢弃，游标照常推进。
     func testOrphanRecord_isDropped_andSyncSucceeds() async throws {
         MockURLProtocol.handler = { [self] request in
