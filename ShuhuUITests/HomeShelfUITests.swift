@@ -122,6 +122,8 @@ final class HomeShelfUITests: XCTestCase {
 
         XCTAssertEqual(second.frame.minY, before, accuracy: 4, "长按不动就松手，顺序与位置都不该变")
         XCTAssertLessThan(row(app, 1).frame.minY, second.frame.minY, "第 1 本仍在第 2 本之前")
+        // 起拖会取消本次触摸：长按松手不该被书行的点按接住跳进详情页
+        XCTAssertTrue(row(app, 1).exists && row(app, 2).exists, "长按松手跳进了详情页")
     }
 
     // MARK: - 广告「广告 ▾」下拉

@@ -16,25 +16,49 @@ import CoreGraphics
 /// 现在位移不会自己变，且同一 (当前槽位, 位移) 必得同一结果，手指不动就绝不可能换位。
 enum HomeReorder {
 
-    /// 各显示槽位的中线（下标 = 显示序）。广告固定占一个槽位（书 ≥ 2 本时插在第 3 个显示位）。
+    /// 一个槽位（下标 = 显示序）：内容坐标系里的上沿、高度与中线。
+    /// 广告固定占一个槽位（书 ≥ 2 本时插在第 3 个显示位）。
+    struct Slot: Equatable {
+        let top: CGFloat
+        let height: CGFloat
+
+        var mid: CGFloat { top + height / 2 }
+        var bottom: CGFloat { top + height }
+    }
+
+    static func slots(
+        bookCount: Int,
+        bookRowHeight: CGFloat,
+        adHeight: CGFloat,
+        hasAd: Bool,
+    ) -> [Slot] {
+        var heights = Array(repeating: bookRowHeight, count: max(bookCount, 0))
+        if hasAd, !heights.isEmpty {
+            heights.insert(adHeight, at: min(2, heights.count))
+        }
+        var slots: [Slot] = []
+        slots.reserveCapacity(heights.count)
+        var top: CGFloat = 0
+        for height in heights {
+            slots.append(Slot(top: top, height: height))
+            top += height
+        }
+        return slots
+    }
+
+    /// 各显示槽位的中线（下标 = 显示序）。
     static func slotMids(
         bookCount: Int,
         bookRowHeight: CGFloat,
         adHeight: CGFloat,
         hasAd: Bool,
     ) -> [CGFloat] {
-        var heights = Array(repeating: bookRowHeight, count: max(bookCount, 0))
-        if hasAd, !heights.isEmpty {
-            heights.insert(adHeight, at: min(2, heights.count))
-        }
-        var mids: [CGFloat] = []
-        mids.reserveCapacity(heights.count)
-        var top: CGFloat = 0
-        for height in heights {
-            mids.append(top + height / 2)
-            top += height
-        }
-        return mids
+        slots(
+            bookCount: bookCount,
+            bookRowHeight: bookRowHeight,
+            adHeight: adHeight,
+            hasAd: hasAd,
+        ).map(\.mid)
     }
 
     /// 书下标 → 槽位下标（广告占掉一个槽位，故其后的书都往后错一位）。
