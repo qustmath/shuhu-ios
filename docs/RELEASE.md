@@ -23,6 +23,47 @@ git tag release-1.1-20260920 && git push origin release-1.1-20260920
 # 标签推上即触发 Release workflow（匹配 release-* 模式）
 ```
 
+### 本机 git push / ssh 的两个环境坑（2026-09-21 实测）
+
+1. **系统 ssh 配置权限报错**：直接 `git push` 会失败并提示
+   `Bad owner or permissions on /etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf`。
+   绕过办法是给 git 指定一份自建配置（放工作区，勿入库）：
+
+   ```bash
+   GIT_SSH_COMMAND="ssh -F /path/to/ssh_config" git push origin master
+   ```
+
+   配置内容（`github.com` 段 + 需要时再加 `czx-server` 段）：
+
+   ```
+   Host github.com
+       HostName github.com          # 解析失败时改成本机 getent 到的 IP（见下）
+       User git
+       IdentityFile ~/.ssh/id_ed25519
+       IdentitiesOnly yes
+       StrictHostKeyChecking no
+       UserKnownHostsFile /dev/null
+   ```
+
+2. **本机 DNS 对 github.com 间歇性失败**：`getent hosts github.com` 正常，但 ssh 报
+   `Could not resolve hostname github.com: Temporary failure in name resolution`。
+   把上面 `HostName` 换成本机解析到的 IP（`getent hosts github.com | awk '{print $1}'`）即可绕开。
+   注意 IP 会变，push 成功后再改回域名。
+
+3. **轮询 Actions 状态别用本机 API**：本机匿名访问 `api.github.com` 只有 60 次/小时，
+   几轮轮询就耗尽（之后连 `/rate_limit` 都拿不到）。走服务器中继，配额另算：
+
+   ```bash
+   ssh czx-server "curl -s 'https://api.github.com/repos/qustmath/shuhu-ios/actions/runs?per_page=8'"
+   ```
+
+   失败原因读注解即可（`check-runs/<job-id>/annotations`，无需鉴权）；
+   `actions/jobs/<id>/logs` 需要管理员权限，本机拿不到。
+
+4. **CI 失败先看注解里的「last lines」**：2026-09-21 有一次 exit 70 反复查不到原因，
+   最后发现日志尾部停在 GRDB 包解析——`xcodebuild` 的致命错误走 stderr，而原 ci.yml
+   的管道只 `tee` 了 stdout。已在 ci.yml 补 `2>&1` 并扩大失败 grep（crashed / Testing failed）。
+
 **关键铁律：workflow 绿 ≠ 构建入库。** 上传完成后必须用 ASC REST 复核
 （见「验证构建」），处理完成后 TestFlight 页构建状态应为 VALID。
 
