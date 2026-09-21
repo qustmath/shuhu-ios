@@ -12,13 +12,17 @@ public enum RecordValidationError: Equatable, Sendable {
 /// 与 Android 端 `com.shufou.domain.ReadingRules` 逐条对应（ADR-0001：同一份 spec 双端原生）。
 public enum ReadingRules {
 
-    /// 当前页 = 当前轮次中最新一条记录（先按日期，再按录入时间）的页码；无记录时为 0。
+    /// 当前页 = 当前轮次中最新一条记录（按日期，再录入时间，再 id 兜底）的页码；无记录时为 0。
+    ///
+    /// id 兜底是必须的：同一天同一毫秒录入的两条记录若没有确定次序，
+    /// 「最新一条」就取决于列表顺序，两端（乃至同一端的两次查询）会得出不同的当前页与已读完判定。
     public static func currentPage(records: [ReadingRecord], round: Int = 1) -> Int {
         records
             .filter { $0.round == round }
             .max { a, b in
                 if a.date != b.date { return a.date < b.date }
-                return a.createdAt < b.createdAt
+                if a.createdAt != b.createdAt { return a.createdAt < b.createdAt }
+                return a.id < b.id
             }?
             .pageReached ?? 0
     }

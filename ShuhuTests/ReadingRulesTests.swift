@@ -91,6 +91,15 @@ final class ReadingRulesTests: XCTestCase {
         XCTAssertEqual(second.map(\.pageReached), [20])
     }
 
+    func testCurrentPage_breaksTiesById_regardlessOfListOrder() {
+        // 同一日期、同一录入毫秒（导入/同步等场景可能出现）：id 大者视为最新，
+        // 且结论不得随列表顺序变化——否则两端会算出不同的当前页与「已读完」判定。
+        let smaller = ReadingRecord(id: 7, bookId: 1, date: d2, createdAt: 1_000, pageReached: 100)
+        let larger = ReadingRecord(id: 8, bookId: 1, date: d2, createdAt: 1_000, pageReached: 150)
+        XCTAssertEqual(ReadingRules.currentPage(records: [smaller, larger]), 150)
+        XCTAssertEqual(ReadingRules.currentPage(records: [larger, smaller]), 150, "结论与列表顺序无关")
+    }
+
     // ---- 页码校验 ----
 
     func testValidateNewRecord_mustBeWithinCurrentPageAndTotal() {
