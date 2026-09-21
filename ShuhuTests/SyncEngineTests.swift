@@ -56,7 +56,7 @@ final class SyncEngineTests: XCTestCase {
         let record = try await repository.addRecord(NewRecord(bookId: book.id, date: day(13), pageReached: 10))
 
         var pushBodies: [SyncPushRequest] = []
-        MockURLProtocol.handler = { request in
+        MockURLProtocol.handler = { [self] request in
             switch request.url?.path {
             case "/api/v1/sync/push":
                 if let body = request.bodyData,
@@ -94,7 +94,7 @@ final class SyncEngineTests: XCTestCase {
         let book = try await repository.addBook(NewBook(title: "本地书", author: "", totalPages: 100))
         var pushBodies: [SyncPushRequest] = []
         var pullCursors: [String?] = []
-        MockURLProtocol.handler = { request in
+        MockURLProtocol.handler = { [self] request in
             switch request.url?.path {
             case "/api/v1/sync/push":
                 if let body = request.bodyData,
@@ -138,7 +138,7 @@ final class SyncEngineTests: XCTestCase {
             currentRound: 1, sortOrder: 1, updatedAt: now + 30_000, deletedAt: nil,
         )
         var pullBooks: [SyncBookChange] = [remoteNewer]
-        MockURLProtocol.handler = { request in
+        MockURLProtocol.handler = { [self] request in
             switch request.url?.path {
             case "/api/v1/sync/push":
                 return TestResponses.ok(SyncPushData(cursor: "p", results: []))
@@ -321,7 +321,7 @@ final class SyncEngineTests: XCTestCase {
 
     /// 孤儿记录（挂靠的书在云端不存在）不得让整轮同步失败：记日志丢弃，游标照常推进。
     func testOrphanRecord_isDropped_andSyncSucceeds() async throws {
-        MockURLProtocol.handler = { request in
+        MockURLProtocol.handler = { [self] request in
             switch request.url?.path {
             case "/api/v1/sync/push":
                 return TestResponses.ok(SyncPushData(cursor: "p-cursor", results: []))
@@ -390,7 +390,7 @@ final class SyncEngineTests: XCTestCase {
         // 裁决：并入 → 重置同步状态后走首登合并（本地全量上行）
         var pushedGuids: [String] = []
         let book = try await repository.addBook(NewBook(title: "本地书", author: "", totalPages: 10))
-        MockURLProtocol.handler = { request in
+        MockURLProtocol.handler = { [self] request in
             switch request.url?.path {
             case "/api/v1/sync/push":
                 if let body = request.bodyData,
@@ -463,7 +463,7 @@ final class SyncEngineTests: XCTestCase {
         engine.markBooksChanged([book.guid])
 
         var pushedBooks: [SyncBookChange] = []
-        MockURLProtocol.handler = { request in
+        MockURLProtocol.handler = { [self] request in
             switch request.url?.path {
             case "/api/v1/sync/covers":
                 return TestResponses.ok(SyncCoverUploadData(path: "/static/covers/abc.jpg"))
