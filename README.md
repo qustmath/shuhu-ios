@@ -37,6 +37,11 @@
   `data/sync/SyncEngine.kt`（测试桩用 URLProtocol）。
 - 逾期提示：计划到期后（今天 > 结束日期）今日目标与倒计时消失，改显示「超 N 天 / 差 M 页」与截止日期
   （赭红点缀色 `#9A5048`）。2026-09-21 反转了原「永不实现逾期 UI」的决策，见根仓库 `docs/adr/0002`（已修订）。
+- 书架拖动排序的手势**不用 SwiftUI 手势**：行上挂 `.gesture`/`.simultaneousGesture` 都会把
+  `ScrollView` 的 pan 抢走（整屏只有广告区能滑，CI 的 XCUITest 实测过两次），改为挂在宿主
+  `UIScrollView` 上的 `UILongPressGestureRecognizer`（`Shuhu/App/ShelfReorderGesture.swift`）；
+  换位判定与槽位几何是纯函数（`Shuhu/App/HomeReorder.swift` + `HomeReorderTests`）。
+  来龙去脉见根仓库 `docs/lessons/swiftui-drag-in-scrollview.md`。
 
 ## TestFlight 发版
 
