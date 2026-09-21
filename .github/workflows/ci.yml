@@ -19,6 +19,23 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
+      # runner 镜像里的模拟器会漂移：2026-09-21 有 run 因
+      # `Unable to find a device matching the provided destination specifier`（硬编码 iPhone 16）
+      # 间歇失败。改为按 UDID 选当前镜像上真实可用的第一个 iPhone 模拟器。
+      - name: Pick an available iPhone simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          AVAILABLE=$(xcrun simctl list devices available)
+          echo "$AVAILABLE" | grep -E "iPhone" | head -10 || true
+          UDID=$(echo "$AVAILABLE" | grep -E "iPhone" | head -1 | grep -oE "[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}" || true)
+          if [ -z "$UDID" ]; then
+            echo "::error::runner 上没有可用的 iPhone 模拟器"
+            exit 1
+          fi
+          echo "选中模拟器 UDID: $UDID"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
       - name: Run tests
         run: |
           set -o pipefail
@@ -27,7 +44,7 @@ jobs:
           xcodebuild test \
             -project Shuhu.xcodeproj \
             -scheme Shuhu \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
             2>&1 | tee /tmp/xcodebuild.log | xcbeautify --quiet
 
       # 失败详情以注解形式输出（无需认证即可从 API 读取，开发机在 Ubuntu 上）
