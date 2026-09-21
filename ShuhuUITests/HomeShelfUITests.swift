@@ -33,6 +33,11 @@ final class HomeShelfUITests: XCTestCase {
         app.staticTexts[Seed.readingTitles[index - 1]]
     }
 
+    /// 取行的 y；元素不存在（被 LazyVStack 回收）时返回 nil —— 直接读 `.frame` 会抛测试失败。
+    private func minY(_ element: XCUIElement) -> CGFloat? {
+        element.exists ? element.frame.minY : nil
+    }
+
     /// 轮询等条件成立：拖动/滚动都有动画，加上松手后的落库回灌，断言必须等状态稳定。
     private func waitUntil(_ timeout: TimeInterval = 5, _ condition: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
@@ -57,28 +62,28 @@ final class HomeShelfUITests: XCTestCase {
     /// 于是**只有没挂手势的广告区能滑**，书行上怎么滑都不动。
     func testSwipeOnBookRowScrollsTheShelf() {
         let app = launchSeeded()
-        let before = row(app, 2).frame.minY
+        let before = minY(row(app, 2))!
 
         swipe(row(app, 2), dy: -260)
 
         XCTAssertTrue(
-            waitUntil { self.row(app, 2).frame.minY < before - 50 },
-            "在书行上向上滑没有滚动列表（before=\(before) after=\(row(app, 2).frame.minY)）",
+            waitUntil { (self.minY(self.row(app, 2)) ?? .infinity) < before - 50 },
+            "在书行上向上滑没有滚动列表（before=\(before)）",
         )
     }
 
     /// 反向也要能滑（别把滚动改成单向或把回弹吃掉）。
     func testSwipeDownOnBookRowScrollsBack() {
         let app = launchSeeded()
-        let top = row(app, 2).frame.minY
+        let top = minY(row(app, 2))!
         swipe(row(app, 2), dy: -220)
-        XCTAssertTrue(waitUntil { self.row(app, 2).frame.minY < top - 50 }, "向上滑没滚动")
+        XCTAssertTrue(waitUntil { (self.minY(self.row(app, 2)) ?? .infinity) < top - 50 }, "向上滑没滚动")
 
-        let before = row(app, 2).frame.minY
+        let before = minY(row(app, 2))!
         swipe(row(app, 2), dy: 220)
         XCTAssertTrue(
-            waitUntil { self.row(app, 2).frame.minY > before + 50 },
-            "向下滑没有滚回去（before=\(before) after=\(row(app, 2).frame.minY)）",
+            waitUntil { (self.minY(self.row(app, 2)) ?? -CGFloat.infinity) > before + 50 },
+            "向下滑没有滚回去（before=\(before)）",
         )
     }
 
@@ -96,10 +101,11 @@ final class HomeShelfUITests: XCTestCase {
 
         XCTAssertTrue(
             waitUntil {
-                let y1 = self.row(app, 1).frame.minY
-                return y1 > self.row(app, 2).frame.minY
+                guard let y1 = self.minY(self.row(app, 1)),
+                      let y2 = self.minY(self.row(app, 2)) else { return false }
+                return y1 > y2
             },
-            "拖动后顺序没变：1@\(row(app, 1).frame.minY) 2@\(row(app, 2).frame.minY)",
+            "拖动后顺序没变",
         )
     }
 
