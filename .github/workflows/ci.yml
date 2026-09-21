@@ -22,21 +22,23 @@ jobs:
       - name: Run tests
         run: |
           set -o pipefail
+          # 2>&1 必须带上：xcodebuild 的致命错误（如包解析失败、destination 不可用）走 stderr，
+          # 只 tee stdout 会让日志里只剩前半段，失败原因完全查不到（2026-09-21 踩过）
           xcodebuild test \
             -project Shuhu.xcodeproj \
             -scheme Shuhu \
             -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
-            | tee /tmp/xcodebuild.log | xcbeautify --quiet
+            2>&1 | tee /tmp/xcodebuild.log | xcbeautify --quiet
 
       # 失败详情以注解形式输出（无需认证即可从 API 读取，开发机在 Ubuntu 上）
       - name: Surface failures
         if: failure()
         run: |
-          grep -E "Test Case .*(failed|error)|error:|Fatal error|Failing tests" /tmp/xcodebuild.log | head -50 | while IFS= read -r line; do
+          grep -E "Test Case .*(failed|error|crashed)|error:|Fatal error|Testing failed|Failing tests|crashed" /tmp/xcodebuild.log | head -50 | while IFS= read -r line; do
             echo "::error::${line:0:400}"
           done
           echo "---- last lines ----"
-          tail -40 /tmp/xcodebuild.log | while IFS= read -r line; do
+          tail -60 /tmp/xcodebuild.log | while IFS= read -r line; do
             echo "::error::TAIL ${line:0:300}"
           done
 
