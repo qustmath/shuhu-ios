@@ -1,10 +1,11 @@
 import GRDB
 
 /// SQLite 数据库装配：表结构以 **Android Room v8 的最终形态**直接建表（ADR-0007 同步就绪），
-/// 两端同构后同步契约（shared/sync-api-v1.yaml）按 guid 对齐即可，iOS 无历史版本需要迁移。
+/// 两端同构后同步契约（shared/sync-api-v1.yaml）按 guid 对齐即可。
+/// iOS 已发版，因此后续结构补齐走增量迁移（v2 起），不得改动已应用的 v1。
 public enum Database {
 
-    /// 迁移器：v1 即 Android v8 同构（含 guid 唯一索引、记录外键级联删除）。
+    /// 迁移器：v1 = Android v8 同构（含 guid 唯一索引、记录外键级联删除）；v2 起为增量补齐。
     public static var migrator: DatabaseMigrator {
         var migrator = DatabaseMigrator()
 
@@ -49,6 +50,16 @@ public enum Database {
                 on: "reading_record",
                 columns: ["guid"],
                 unique: true,
+            )
+        }
+
+        // v2：补 reading_record(book_id) 索引。v1 漏建，导致按书查记录走全表扫描
+        // （Android Room 侧一直有这个索引，见 ReadingRecordEntity 的 indices）。
+        migrator.registerMigration("v2") { db in
+            try db.create(
+                index: "index_reading_record_book_id",
+                on: "reading_record",
+                columns: ["book_id"],
             )
         }
 

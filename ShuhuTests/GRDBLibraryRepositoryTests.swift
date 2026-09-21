@@ -311,4 +311,20 @@ final class GRDBLibraryRepositoryTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: path))
         try? FileManager.default.removeItem(atPath: path)
     }
+
+    /// v2 迁移补上 reading_record(book_id) 索引：v1 漏建，按书查记录会走全表扫描
+    /// （Android Room 侧一直有这个索引）。
+    func testMigration_createsReadingRecordBookIdIndex() async throws {
+        let writer = try Database.open()
+        let indexes = try await writer.read { db in
+            try String.fetchAll(
+                db,
+                sql: "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'reading_record'",
+            )
+        }
+        XCTAssertTrue(
+            indexes.contains("index_reading_record_book_id"),
+            "缺少按书查记录的索引，索引现状：\(indexes)",
+        )
+    }
 }
