@@ -15,7 +15,12 @@
 本仓库的开发机是 Ubuntu（无 macOS/Xcode），因此：
 
 - **XcodeGen**：工程由根目录 `project.yml` 描述，`*.xcodeproj` 为生成产物不入库。任何有 macOS 的环境（本机/CI）执行 `xcodegen generate` 即可还原。
-- **编译与测试全部走 GitHub Actions**（`.github/workflows/ci.yml`，macOS runner）：XcodeGen 生成工程 → `xcodebuild test` 在 iOS 模拟器跑全量单测 → `xcodebuild build`（device, unsigned）冒烟。每次 push 自动执行。
+- **编译与测试全部走 GitHub Actions**（`.github/workflows/ci.yml`，macOS runner）：XcodeGen 生成工程 → `xcodebuild test` 在 iOS 模拟器跑全量单测 + UI 测试 → `xcodebuild build`（device, unsigned）冒烟。每次 push 自动执行。
+- **UI 测试（`ShuhuUITests/`, XCUITest）**：手势与滚动这类只有真在模拟器上做手势才现形的行为
+  （行上滑动能不能滚动列表、长按拖动换位、广告「▾」下拉）。App 侧配套一个 **Debug 专用**启动参数
+  `-uiTestSeed`：清库写入演示书单并跳过开屏（`Shuhu/App/UITestSupport.swift` +
+  `GRDBLibraryRepository.resetAndSeedForUITest`）。Release 构建里 `UITestSupport.isSeeded` 恒为 false，
+  播种代码整段 `#if DEBUG`，发版包行为不受影响。
 
 ## 约定
 
@@ -54,7 +59,9 @@ App Store Connect 用户，对方装 TestFlight App 接受邀请；外部测试�
   详情（重读 + 分轮记录 + 记录编辑）→ 我页（统计 + 登录/注册/立即同步/换账号裁决/协议入口）
 - 同步：**SyncEngine 全链路**（首登静默合并、游标分页拉取、防抖推送、401 续期、封面本地文件→服务端引用自愈、
   换账号「并入/清空」裁决）；契约 `shared/sync-api-v1.yaml`
-- 测试：镜像 Android 用例 + URLProtocol 网络桩（引擎分支矩阵、401 续期重试、换账号挂起）
+- 测试：镜像 Android 用例 + URLProtocol 网络桩（引擎分支矩阵、401 续期重试、换账号挂起）；
+  书架手势另有一层 XCUITest（`ShuhuUITests/HomeShelfUITests.swift`），配合换位判定的纯函数单测
+  `HomeReorderTests`（拖动排序的「手指不动就不可能换位」这条性质写死在测试里）
 
 ## 下一步（候选票）
 

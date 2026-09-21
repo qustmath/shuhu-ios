@@ -36,6 +36,17 @@ public final class GRDBLibraryRepository: LibraryRepository, Sendable {
         )
     }
 
+    /// 启动装配用：正常走默认库；Debug 构建下带 `-uiTestSeed` 时清库播种（UI 测试专用）。
+    public static func makeForLaunch() throws -> GRDBLibraryRepository {
+        let repository = try makeDefault()
+        #if DEBUG
+        if UITestSupport.isSeeded {
+            try repository.resetAndSeedForUITest()
+        }
+        #endif
+        return repository
+    }
+
     // ---- 查询 ----
 
     public func books() async throws -> [Book] {
@@ -424,3 +435,46 @@ private struct RecordRow: Codable, FetchableRecord, PersistableRecord {
         )
     }
 }
+
+#if DEBUG
+// ---- UI 测试播种（Release 构建不存在这段代码；BookRow/RecordRow 是文件私有类型，故写在本文件）----
+
+extension GRDBLibraryRepository {
+    /// 清库后写入演示书单：8 本在读（列表必然超过一屏 → 可测滚动与拖动）+ 2 本已读完。
+    /// 每个 UI 测试方法都从同一初始状态开始，测试之间互不污染。
+    func resetAndSeedForUITest() throws {
+        let reading: [(title: String, totalPages: Int, pageReached: Int)] =
+            UITestSupport.Seed.readingTitles.enumerated().map { index, title in
+                (title, 300 + index * 10, 30 + index * 20)
+            }
+        let finished: [(title: String, totalPages: Int, pageReached: Int)] =
+            UITestSupport.Seed.finishedTitles.map { ($0, 200, 200) }
+
+        try writer.write { db in
+            try db.execute(sql: "DELETE FROM reading_record")
+            try db.execute(sql: "DELETE FROM book")
+            let now = currentTimeMillis()
+            for (order, spec) in (reading + finished).enumerated() {
+                var book = BookRow(draft: NewBook(
+                    title: spec.title,
+                    author: "演示作者",
+                    totalPages: spec.totalPages,
+                ))
+                book.sort_order = order
+                book.guid = UUID().uuidString
+                book.updated_at = now
+                try book.insert(db)
+
+                var record = RecordRow(draft: NewRecord(
+                    bookId: db.lastInsertedRowID,
+                    date: CalendarDay.today(),
+                    pageReached: spec.pageReached,
+                ))
+                record.guid = UUID().uuidString
+                record.updated_at = now
+                try record.insert(db)
+            }
+        }
+    }
+}
+#endif

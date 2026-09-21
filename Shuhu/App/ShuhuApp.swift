@@ -18,7 +18,7 @@ final class AppContainer {
 
     init() {
         do {
-            inner = try GRDBLibraryRepository.makeDefault()
+            inner = try GRDBLibraryRepository.makeForLaunch()
         } catch {
             // 数据库打不开属不可恢复错误（磁盘/沙盒异常），启动即失败优于静默丢数据
             fatalError("数据库初始化失败: \(error)")
@@ -90,6 +90,11 @@ struct ShuhuApp: App {
 
     /// 冷启动拉取开屏素材（含失败/无素材）：完成即放行进主页。
     private func fetchSplash() async {
+        // UI 测试播种时跳过开屏（测试只关心书架，且需要书架立刻可见）
+        if UITestSupport.isSeeded {
+            splashReady = true
+            return
+        }
         let creatives = await container.adsClient.activeCreatives(slot: AdSlots.splash)
         splashCreative = creatives.first
         splashReady = true

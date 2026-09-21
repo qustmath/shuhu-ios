@@ -55,15 +55,31 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
 
+  # XCUITest：手势/滚动这类只有在模拟器上真做手势才现形的行为（见 ShuhuUITests/HomeShelfUITests.swift）。
+  # 只进 test 动作，archive 发版不构建它（Release 签名配置仍只作用于 App 目标）。
+  ShuhuUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - ShuhuUITests
+    dependencies:
+      - target: Shuhu
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Shuhu
+
 schemes:
   Shuhu:
     build:
       targets:
         Shuhu: all
         ShuhuTests: [test]
+        ShuhuUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
         - ShuhuTests
+        - ShuhuUITests
