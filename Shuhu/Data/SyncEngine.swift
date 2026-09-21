@@ -1,12 +1,16 @@
 import Foundation
 import Combine
+import OSLog
 
 /// 同步引擎（data-sync 票 07/08/09，ADR-0007 客户端主从）：
 /// - 本地写操作经 `SyncAwareLibraryRepository` 入待推队列，`notifyLocalChange` 防抖推送
 /// - 首次同步把本地全部数据标记待推（本地全量上行，首登合并的基础）
 /// - 拉取按游标分页；远端变更经 `applyRemoteBook/applyRemoteRecord` 原样应用（LWW）
 /// - 断网/服务端错误一律静默：本地数据不丢，下次触发（启动/写操作/登录）自然重试
+/// - 游标只在一轮全部应用成功后推进（见 `pullAll()`）：中途失败不丢已拉取的记录
 public final class SyncEngine: SyncController, @unchecked Sendable {
+
+    private static let logger = Logger(subsystem: "ink.groovy.shuhu", category: "sync")
 
     /// 未装饰的内层仓库：引擎读取与远端应用都走它（避免远端应用被误标为本地变更）。
     private let repository: LibraryRepository
@@ -282,40 +286,88 @@ public final class SyncEngine: SyncController, @unchecked Sendable {
         return path.hasPrefix(base) ? String(path.dropFirst(base.count)) : path
     }
 
-    /// 分页拉取远端变更：书籍即时应用；记录先缓冲、全部书籍就位后再应用
-    /// （记录需要本地 bookId 外键，而书籍可能在后续页才到）。
-    /// 远端被实际应用（严格较新）的行出待推队；本地较新的保留待推。
+    /// 分页拉取远端变更：**逐页应用**，书与记录都当场落库。
+    ///
+    /// ⚠️ 游标只在**本轮全部页与全部待落库记录都处理成功后**推进一次（不许在分页循环里落盘）：
+    /// 分页中途任一页失败会抛错并由 `performSync` 静默吞掉，若先前已推进游标，
+    /// 那几页已下发的记录就再也拉不回来了。游标不推进时重拉同一批是安全的：
+    /// applyRemote* 幂等（本地不旧就跳过、墓碑不落行）。
+    ///
+    /// 记录的书可能还没到本地（书在后续页，或书那一行本轮没拉下来）：
+    /// 这类记录进持久化的待落库队列（`SyncStore.addPendingPullRecords`），
+    /// 每轮同步开头先重试。整库拉完仍无法落库的才判定为孤儿（其书在云端不存在）、
+    /// 记日志丢弃——服务端 push 已从源头拦截孤儿记录，此处只兜存量坏数据。
+    ///
     /// 封面（票 09）：服务端引用改写为完整 URL；远端墓碑或封面被替换时级联删除本地旧封面文件。
     private func pullAll() async throws {
         var cursor = store.cursor()
-        var bufferedRecords: [SyncRecordChange] = []
+        var lastCursor = cursor
+        var buffered: [String: SyncRecordChange] = [:]
+        // 上一轮遗留的待落库记录：保持原相对路径（本轮拉到同一本后会覆盖为完整 URL）
+        for record in store.pendingPullRecords() { buffered[record.guid] = record }
+
         while true {
             let response = try await api.pull(cursor: cursor)
             for change in response.books ?? [] {
-                let localBefore = try await repository.bookByGuid(guid: change.guid)
-                var domain = change.toDomain()
-                if let cover = domain.coverImagePath, cover.hasPrefix("/static/") {
-                    domain.coverImagePath = Self.trimTrailingSlash(apiBaseURL) + cover
-                }
-                if try await repository.applyRemoteBook(domain) {
-                    store.removePendingBook(change.guid)
-                    let oldCover = localBefore?.coverImagePath
-                    let coverReplaced = domain.coverImagePath != oldCover || domain.deletedAt != nil
-                    if coverReplaced, let oldCover, !oldCover.hasPrefix("http") {
-                        try? await repository.deleteCoverFile(path: oldCover)
-                    }
-                }
+                try await applyRemoteBookChange(change)
             }
-            bufferedRecords += response.records ?? []
-            store.saveCursor(response.cursor)
+            for record in response.records ?? [] { buffered[record.guid] = record }
+            let applied = try await drainBufferedRecords(&buffered)
+            store.removePendingPullRecords(applied)
+            store.addPendingPullRecords(Array(buffered.values))
+            lastCursor = response.cursor
             guard response.hasMore == true else { break }
             cursor = response.cursor
         }
-        for change in bufferedRecords {
+
+        // 整库已拉完，仍未映射到本地书的记录：其书在云端不存在（游标语义保证不会漏页）
+        if !buffered.isEmpty {
+            for change in buffered.values {
+                Self.logger.warning("丢弃孤儿阅读记录：guid=\(change.guid, privacy: .public) 挂靠的书 \(change.bookGuid, privacy: .public) 在云端不存在")
+            }
+            Self.logger.warning("本轮同步丢弃 \(buffered.count) 条孤儿阅读记录（其书在云端不存在）")
+            store.removePendingPullRecords(Array(buffered.keys))
+        }
+        if let lastCursor {
+            store.saveCursor(lastCursor)
+        }
+    }
+
+    /// 尝试把缓冲里能映射到本地书的记录落库，返回已落库记录的 guid（用于清理持久化队列）。
+    /// 仍未能落库的留在缓冲里（其书尚未就位）。
+    private func drainBufferedRecords(_ buffered: inout [String: SyncRecordChange]) async throws -> [String] {
+        var applied: [String] = []
+        for change in Array(buffered.values) {
             guard let book = try await repository.bookByGuid(guid: change.bookGuid) else { continue }
-            guard let record = change.toDomain(bookId: book.id) else { continue }
+            guard let record = change.toDomain(bookId: book.id) else {
+                // 日期缺失/非法：无法落库，按不可用数据丢弃（镜像 Android 的解析失败处理）
+                Self.logger.warning("丢弃无法解析的远端记录：guid=\(change.guid, privacy: .public)")
+                buffered.removeValue(forKey: change.guid)
+                applied.append(change.guid)
+                continue
+            }
             if try await repository.applyRemoteRecord(record) {
                 store.removePendingRecord(change.guid)
+            }
+            applied.append(change.guid)
+            buffered.removeValue(forKey: change.guid)
+        }
+        return applied
+    }
+
+    /// 应用一条远端书籍变更；封面由服务端引用改写为完整 URL，被替换/墓碑时删本地旧文件。
+    private func applyRemoteBookChange(_ change: SyncBookChange) async throws {
+        let localBefore = try await repository.bookByGuid(guid: change.guid)
+        var domain = change.toDomain()
+        if let cover = domain.coverImagePath, cover.hasPrefix("/static/") {
+            domain.coverImagePath = Self.trimTrailingSlash(apiBaseURL) + cover
+        }
+        if try await repository.applyRemoteBook(domain) {
+            store.removePendingBook(change.guid)
+            let oldCover = localBefore?.coverImagePath
+            let coverReplaced = domain.coverImagePath != oldCover || domain.deletedAt != nil
+            if coverReplaced, let oldCover, !oldCover.hasPrefix("http") {
+                try? await repository.deleteCoverFile(path: oldCover)
             }
         }
     }

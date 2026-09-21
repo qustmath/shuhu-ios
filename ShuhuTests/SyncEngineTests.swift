@@ -163,6 +163,153 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertEqual(local?.title, "云端改名", "本地较新 → 忽略远端旧行")
     }
 
+    // ---- 游标推进时机（同步丢记录的修复）----
+
+    /// 分页中途失败不得丢已拉取的记录：游标必须等本轮全部应用成功后才推进。
+    /// 回归自「循环内落盘游标」的旧实现——第 2 页失败会连带丢掉第 1 页缓冲的记录。
+    func testPullFailsMidPagination_keepsAlreadyFetchedRecords_andDoesNotAdvanceCursor() async throws {
+        var pullCursors: [String?] = []
+        var failPullsFrom: Int?
+        MockURLProtocol.handler = { [self] request in
+            switch request.url?.path {
+            case "/api/v1/sync/push":
+                return TestResponses.ok(SyncPushData(cursor: "p-cursor", results: []))
+            case "/api/v1/sync/pull":
+                pullCursors.append(self.cursorParam(of: request))
+                if let failPullsFrom, pullCursors.count >= failPullsFrom {
+                    throw URLError(.networkConnectionLost) // 模拟分页中途断网
+                }
+                switch pullCursors.count {
+                case 1:
+                    // 第 1 页：书 + 两条记录（真实服务端保证同一成员... 书的 seq 更早）
+                    return TestResponses.ok(SyncPullData(
+                        cursor: "20.2", hasMore: true,
+                        books: [SyncBookChange(guid: "g-book", title: "载体", author: "", totalPages: 100,
+                                               currentRound: 1, sortOrder: 1, updatedAt: 100, deletedAt: nil)],
+                        records: [
+                            SyncRecordChange(guid: "r-1", bookGuid: "g-book", date: "2026-09-09",
+                                             createdAt: 10, pageReached: 10, round: 1, updatedAt: 100),
+                            SyncRecordChange(guid: "r-2", bookGuid: "g-book", date: "2026-09-09",
+                                             createdAt: 20, pageReached: 20, round: 1, updatedAt: 200),
+                        ],
+                    ))
+                default:
+                    // 第 2 页：第三条记录
+                    return TestResponses.ok(SyncPullData(
+                        cursor: "20.3", hasMore: false, books: [],
+                        records: [
+                            SyncRecordChange(guid: "r-3", bookGuid: "g-book", date: "2026-09-09",
+                                             createdAt: 30, pageReached: 30, round: 1, updatedAt: 300),
+                        ],
+                    ))
+                }
+            default:
+                return TestResponses.okEmpty()
+            }
+        }
+        session.send(member())
+        XCTAssertNil(store.cursor(), "前置：尚未同步过")
+
+        // 第 1 页成功、第 2 页失败
+        failPullsFrom = 2
+        let first = await engine.syncNow()
+        XCTAssertFalse(first, "中途失败应返回 false（静默）")
+
+        let book = try await repository.bookByGuid(guid: "g-book")
+        let bookId = try XCTUnwrap(book?.id)
+        let pagesAfterFailure = try await repository.records(bookId: bookId).map(\.pageReached)
+        XCTAssertEqual(Set(pagesAfterFailure), [10, 20], "第 1 页已拉到的记录必须落库，不得随失败一起消失")
+        XCTAssertNil(store.cursor(), "本轮未完整应用，游标不得推进")
+
+        // 重试：从同一游标重拉，幂等重放后补齐剩余记录
+        failPullsFrom = nil
+        pullCursors.removeAll()
+        let second = await engine.syncNow()
+        XCTAssertTrue(second)
+        let pagesAfterRetry = try await repository.records(bookId: bookId).map(\.pageReached)
+        XCTAssertEqual(Set(pagesAfterRetry), [10, 20, 30], "重试后应补齐全部记录（已应用的行幂等重放，不重复插入）")
+        XCTAssertEqual(pullCursors.first ?? nil, nil, "重试应从同一游标（空）重新开始")
+        XCTAssertEqual(store.cursor(), "20.3", "完整成功后游标才推进")
+    }
+
+    /// 记录先于其书到达（书在后续页）：进待落库队列，书到位后同轮补上，不得丢。
+    func testRecordAheadOfItsBook_isQueuedThenAppliedOnceBookArrives() async throws {
+        var pullCalls = 0
+        var queueMidRound: [String] = []
+        MockURLProtocol.handler = { [self] request in
+            switch request.url?.path {
+            case "/api/v1/sync/push":
+                return TestResponses.ok(SyncPushData(cursor: "p-cursor", results: []))
+            case "/api/v1/sync/pull":
+                pullCalls += 1
+                if pullCalls == 1 {
+                    // 第 1 页：陪衬书 + 目标记录（目标书在下一页）
+                    return TestResponses.ok(SyncPullData(
+                        cursor: "1.1", hasMore: true,
+                        books: [SyncBookChange(guid: "g-decoy", title: "陪衬", author: "", totalPages: 10,
+                                               currentRound: 1, sortOrder: 1, updatedAt: 100, deletedAt: nil)],
+                        records: [SyncRecordChange(guid: "r-1", bookGuid: "g-book", date: "2026-09-09",
+                                                   createdAt: 10, pageReached: 42, round: 1, updatedAt: 100)],
+                    ))
+                }
+                if pullCalls == 2 {
+                    // 第 1 页返回后：记录还没落库，必须在队列里等它的书
+                    queueMidRound = self.store.pendingPullRecords().map(\.guid)
+                }
+                return TestResponses.ok(SyncPullData(
+                    cursor: "2.1", hasMore: false,
+                    books: [SyncBookChange(guid: "g-book", title: "载体", author: "", totalPages: 100,
+                                           currentRound: 1, sortOrder: 1, updatedAt: 200, deletedAt: nil)],
+                    records: [],
+                ))
+            default:
+                return TestResponses.okEmpty()
+            }
+        }
+        session.send(member())
+
+        let ok = await engine.syncNow()
+        XCTAssertTrue(ok, "时序错位不该让同步失败")
+        XCTAssertEqual(queueMidRound, ["r-1"], "书还没到时，记录必须进持久化待落库队列（旧实现在此处直接丢弃）")
+
+        let book = try await repository.bookByGuid(guid: "g-book")
+        let bookId = try XCTUnwrap(book?.id)
+        XCTAssertEqual(try await repository.records(bookId: bookId).map(\.pageReached), [42], "书到位后应补上先到的记录")
+        XCTAssertTrue(store.pendingPullRecords().isEmpty, "补上后清空待落库队列")
+    }
+
+    /// 孤儿记录（挂靠的书在云端不存在）不得让整轮同步失败：记日志丢弃，游标照常推进。
+    func testOrphanRecord_isDropped_andSyncSucceeds() async throws {
+        MockURLProtocol.handler = { [self] request in
+            switch request.url?.path {
+            case "/api/v1/sync/push":
+                return TestResponses.ok(SyncPushData(cursor: "p-cursor", results: []))
+            case "/api/v1/sync/pull":
+                return TestResponses.ok(SyncPullData(
+                    cursor: "20.2", hasMore: false,
+                    books: [SyncBookChange(guid: "g-book", title: "载体", author: "", totalPages: 100,
+                                           currentRound: 1, sortOrder: 1, updatedAt: 100, deletedAt: nil)],
+                    records: [
+                        SyncRecordChange(guid: "r-ok", bookGuid: "g-book", date: "2026-09-09",
+                                         createdAt: 10, pageReached: 42, round: 1, updatedAt: 100),
+                        SyncRecordChange(guid: "r-orphan", bookGuid: "g-missing", date: "2026-09-09",
+                                         createdAt: 20, pageReached: 7, round: 1, updatedAt: 100),
+                    ],
+                ))
+            default:
+                return TestResponses.okEmpty()
+            }
+        }
+        session.send(member())
+
+        let ok = await engine.syncNow()
+        XCTAssertTrue(ok, "孤儿记录不得让同步失败")
+
+        let all = try await repository.allRecords()
+        XCTAssertEqual(all.map(\.pageReached), [42], "孤儿记录被丢弃，合法记录照常落库")
+        XCTAssertEqual(store.cursor(), "20.2", "孤儿记录不阻塞游标推进（否则同步永久卡死）")
+    }
+
     // ---- 换账号裁决（票 08）----
 
     func testStart_detectsAccountSwitch_andFetchesCloudSummary() async throws {

@@ -2,8 +2,9 @@ import Foundation
 
 /// 阅读计划（Reading Plan）相关的派生状态与校验。全部为纯函数。
 ///
-/// ⚠️ ADR-0002：计划到期后（今天 > 结束日期），每日目标与倒计时**完全消失**，
-/// 本文件刻意不提供任何"逾期/落后"类计算结果。
+/// ADR-0002（2026-09-21 修订）：计划到期后（今天 > 结束日期），每日目标与倒计时**完全消失**
+/// （`dailyTarget` 返回 nil），改由 UI 显示「超 N 天 / 差 M 页」的逾期提示
+/// （文案见 `DateFormats.overdueLine`，逾期天数由 `remainingDays` 为负推出）。
 ///
 /// 与 Android 端 `com.shufou.domain.ReadingPlan` 逐函数对应，测试用例一一镜像。
 public enum ReadingPlan {

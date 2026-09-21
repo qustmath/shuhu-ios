@@ -30,7 +30,8 @@
   应用层持有 `SyncAwareLibraryRepository` 装饰器（写路径登记待推并防抖同步）。
 - 同步：以 [shared/](../shared/) 契约为准（ADR-0007/0003）；引擎、账号切换裁决、封面自愈均镜像 Android
   `data/sync/SyncEngine.kt`（测试桩用 URLProtocol）。
-- ⚠️ 永远不要实现逾期/落后 UI（docs/adr/0002）。
+- 逾期提示：计划到期后（今天 > 结束日期）今日目标与倒计时消失，改显示「超 N 天 / 差 M 页」与截止日期
+  （赭红点缀色 `#9A5048`）。2026-09-21 反转了原「永不实现逾期 UI」的决策，见根仓库 `docs/adr/0002`（已修订）。
 
 ## TestFlight 发版
 
