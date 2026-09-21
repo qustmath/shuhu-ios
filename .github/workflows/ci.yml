@@ -47,17 +47,17 @@ jobs:
             -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
             2>&1 | tee /tmp/xcodebuild.log | xcbeautify --quiet
 
-      # 失败详情以注解形式输出（无需认证即可从 API 读取，开发机在 Ubuntu 上）
+      # 失败详情以注解形式输出（开发机在 Ubuntu、拿不到 Actions 日志下载权限，只能读注解）
       - name: Surface failures
         if: failure()
         run: |
-          grep -E "Test Case .*(failed|error|crashed)|error:|Fatal error|Testing failed|Failing tests|crashed" /tmp/xcodebuild.log | head -50 | while IFS= read -r line; do
+          grep -E "Test Case .*(failed|error|crashed)|error:|Fatal error|Testing failed|Failing tests|crashed" /tmp/xcodebuild.log | head -30 | while IFS= read -r line; do
             echo "::error::${line:0:400}"
           done
-          echo "---- last lines ----"
-          tail -60 /tmp/xcodebuild.log | while IFS= read -r line; do
-            echo "::error::TAIL ${line:0:300}"
-          done
+          # 尾日志塞进**一条**注解（%0A 转义换行）：按行拆成几十条注解时 GitHub 只留前若干条，
+          # 真正的现场（XCUITest 活动日志 / App event loop 之类）反而看不到（2026-09-21 踩过）。
+          ENCODED=$(tail -150 /tmp/xcodebuild.log | sed 's/%/%25/g; s/\r//g' | awk '{ printf "%s%%0A", $0 }')
+          echo "::error::LOGTAIL ${ENCODED:0:24000}"
 
       - name: Build for device (unsigned, smoke)
         run: |
