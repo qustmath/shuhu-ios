@@ -23,7 +23,7 @@ final class AppContainer {
             // 数据库打不开属不可恢复错误（磁盘/沙盒异常），启动即失败优于静默丢数据
             fatalError("数据库初始化失败: \(error)")
         }
-        let baseURL = URL(string: "https://rrapi.groovy.ink")!
+        let baseURL = URL(string: "https://rrapi.groovyu.com")!
         let publicClient = ApiClient(baseURL: baseURL)
         let authedClient = ApiClient(baseURL: baseURL)
         auth = RemoteAuthRepository(

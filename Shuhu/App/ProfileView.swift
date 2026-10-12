@@ -375,7 +375,7 @@ struct ProfileView: View {
     /// 服务端头像引用：完整 URL 直接用，相对路径拼 API 主机（与 Android 同口径）。
     private func avatarURL(_ avatar: String) -> URL? {
         if avatar.hasPrefix("http") { return URL(string: avatar) }
-        return URL(string: "https://rrapi.groovy.ink" + avatar)
+        return URL(string: "https://rrapi.groovyu.com" + avatar)
     }
 
     // ---- 手机号行 ----

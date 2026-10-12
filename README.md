@@ -7,7 +7,7 @@
 | 参数 | 值 |
 |---|---|
 | Bundle ID | `ink.groovy.shuhu`（与 Android 包名一致） |
-| Universal Links | `https://rrapi.groovy.ink/app/`（AASA 已上线，见根仓库 docs/deploy.md） |
+| Universal Links | `https://rrapi.groovyu.com/app/`（2026-10-12 域名迁至 groovyu.com；微信开放平台后台登记值需同步为此，AASA 已在新域名上线，见根仓库 docs/deploy.md） |
 | Apple Team ID | `RHXA5ZS73K`（已填入 `project.yml` 的 `DEVELOPMENT_TEAM`，AASA 已替换） |
 
 ## 工程形态（Linux 开发 + GitHub Actions 构建）
