@@ -21,18 +21,6 @@ public protocol WechatAuthCodeClient: AnyObject {
     func handleOpen(url: URL)
 }
 
-public extension WechatAuthCodeClient where Self == UnavailableWechatAuthClient {
-    /// 占位实现：调用即报未配置。
-    static var unavailable: WechatAuthCodeClient { UnavailableWechatAuthClient() }
-}
-
-/// 占位实现。
-final class UnavailableWechatAuthClient: WechatAuthCodeClient {
-    var canLogin: Bool { false }
-    func requestAuthCode() async throws -> String { throw ApiError(nil, "微信登录暂不可用") }
-    func handleOpen(url: URL) {}
-}
-
 /// 真实实现：进程内单例（AppContainer 持有）。`requestAuthCode` 与 WXApiDelegate 回调
 /// 经 pendingAuth 配对——state 防串扰，挂起的调用方等 state 匹配的那次授权结果，其余回调忽略。
 @MainActor
