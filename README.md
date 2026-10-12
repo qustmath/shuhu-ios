@@ -7,6 +7,7 @@
 | 参数 | 值 |
 |---|---|
 | Bundle ID | `ink.groovy.shuhu`（与 Android 包名一致） |
+| 微信 AppID | `wxf38812d6f87e3561`（与 Android 同一移动应用；客户端 `Shuhu/Data/WechatAuthClient.swift` 的 `WechatConfig.appId`） |
 | Universal Links | `https://rrapi.groovyu.com/app/`（2026-10-12 域名迁至 groovyu.com；微信开放平台后台登记值需同步为此，AASA 已在新域名上线，见根仓库 docs/deploy.md） |
 | Apple Team ID | `RHXA5ZS73K`（已填入 `project.yml` 的 `DEVELOPMENT_TEAM`，AASA 已替换） |
 
