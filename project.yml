@@ -5,11 +5,15 @@ options:
     iOS: "17.0"
   createIntermediateGroups: true
 
-# 依赖（SPM）：GRDB = SQLite 的 Swift 封装（迁移/事务/并发模型与 Android Room 同构）
+# 依赖（SPM）：GRDB = SQLite 的 Swift 封装（迁移/事务/并发模型与 Android Room 同构）；
+# WechatOpenSDK = 微信开放 SDK 的 XCFramework SPM 包装（社区同步官方 CocoaPods 二进制，票 02）
 packages:
   GRDB:
     url: https://github.com/groue/GRDB.swift
     exactVersion: 6.29.3
+  WechatOpenSDK:
+    url: https://github.com/yanyin1986/WechatOpenSDK
+    from: 2.0.4
 
 settings:
   base:
@@ -25,8 +29,18 @@ targets:
     platform: iOS
     sources:
       - Shuhu
+    # Universal Links 关联域（微信授权回跳用）：与微信开放平台后台登记值、
+    # 服务器 /var/www/apple/.well-known/apple-app-site-association 三方一致，勿改。
+    # ⚠️ Release 手动签名的描述文件必须重建并带 Associated Domains 能力，否则归档失败。
+    entitlements:
+      path: Shuhu/Shuhu.entitlements
+      properties:
+        com.apple.developer.associated-domains:
+          - applinks:rrapi.groovyu.com
     dependencies:
       - package: GRDB
+      - package: WechatOpenSDK
+        product: WechatOpenSDK
     settings:
       base:
         # 与 Android 包名一致（微信开放平台 iPhone 应用登记值，勿改）

@@ -1,6 +1,19 @@
 import Foundation
 import Combine
 
+/// 已绑定的微信身份概览（服务端 /me 与登录载荷的 wechatIdentities 条目）。与 Android `WechatIdentityBrief` 对应。
+public struct WechatIdentityBrief: Equatable, Hashable, Codable, Sendable {
+    public let id: Int64
+    public let channel: String
+    public let nickname: String
+
+    public init(id: Int64, channel: String, nickname: String = "") {
+        self.id = id
+        self.channel = channel
+        self.nickname = nickname
+    }
+}
+
 /// 已登录会员的本地快照（服务端会员资料的视图）。与 Android `AuthMember` 对应。
 public struct AuthMember: Equatable, Hashable, Sendable {
     public let id: Int64
@@ -12,14 +25,20 @@ public struct AuthMember: Equatable, Hashable, Sendable {
     public let level: Int
     /// 会员到期时间（服务端 RFC3339）；nil = 无到期时间（终身/未开通）。
     public let expireAt: String?
+    /// 已绑定的微信身份；空数组 = 未绑定微信。
+    public let wechatIdentities: [WechatIdentityBrief]
 
-    public init(id: Int64, phone: String, nickname: String, avatar: String = "", level: Int = 0, expireAt: String? = nil) {
+    public init(
+        id: Int64, phone: String, nickname: String, avatar: String = "", level: Int = 0,
+        expireAt: String? = nil, wechatIdentities: [WechatIdentityBrief] = [],
+    ) {
         self.id = id
         self.phone = phone
         self.nickname = nickname
         self.avatar = avatar
         self.level = level
         self.expireAt = expireAt
+        self.wechatIdentities = wechatIdentities
     }
 
     /// 展示名：优先昵称（用户自取的名字），无昵称回落手机号，最后兜底「微信用户」。
@@ -66,7 +85,7 @@ public struct AuthMember: Equatable, Hashable, Sendable {
 /// 避免升级后本地登录态被误判失效。
 extension AuthMember: Codable {
     private enum CodingKeys: String, CodingKey {
-        case id, phone, nickname, avatar, level, expireAt
+        case id, phone, nickname, avatar, level, expireAt, wechatIdentities
     }
 
     public init(from decoder: Decoder) throws {
@@ -77,6 +96,8 @@ extension AuthMember: Codable {
         avatar = try container.decodeIfPresent(String.self, forKey: .avatar) ?? ""
         level = try container.decodeIfPresent(Int.self, forKey: .level) ?? 0
         expireAt = try container.decodeIfPresent(String.self, forKey: .expireAt)
+        // 老版本快照无此键 → 未绑定（与 avatar/level 的兼容口径一致）
+        wechatIdentities = try container.decodeIfPresent([WechatIdentityBrief].self, forKey: .wechatIdentities) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -87,6 +108,7 @@ extension AuthMember: Codable {
         try container.encode(avatar, forKey: .avatar)
         try container.encode(level, forKey: .level)
         try container.encodeIfPresent(expireAt, forKey: .expireAt)
+        try container.encode(wechatIdentities, forKey: .wechatIdentities)
     }
 }
 
@@ -142,8 +164,19 @@ public protocol AuthRepository: AnyObject {
     func login(phone: String, password: String) async throws -> AuthMember
 
     /// 开发联调：以 dev 伪 code 走微信登录全链路（ADR-0009）。
-    /// 仅 debug 构建在 UI 暴露入口；真实微信 SDK 接入后由正式登录替代。
+    /// 仅 debug 构建在 UI 暴露入口；正式入口是 `loginWithWechat(code:)`。
     func loginWithWechatDev(devCode: String) async throws -> AuthMember
+
+    /// 真实微信登录：以微信 OpenSDK 授权码走移动应用渠道（channel=mobile_app）。
+    /// 首次登录由服务端自动注册空壳账号（ADR-0005），UnionID 存在时跨渠道归一到同一会员。
+    func loginWithWechat(code: String) async throws -> AuthMember
+
+    /// 绑定微信到当前已登录账号；冲突按 ADR-0005 服务端裁决（空壳并入/正式账号拒绝）。
+    /// 成功后拉最新资料刷新登录态快照（携带微信绑定状态）。
+    func bindWechat(code: String) async throws -> AuthMember
+
+    /// 解绑指定微信身份；服务端校验解绑后仍有可用登录方式，违规拒绝。成功后刷新快照。
+    func unbindWechat(identityId: Int64) async throws -> AuthMember
 
     /// 登出：撤销服务端会话并清空本地登录态；本地数据不受影响。
     func logout() async

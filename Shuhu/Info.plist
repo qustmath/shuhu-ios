@@ -26,6 +26,13 @@
 	<!-- 拍摄书籍封面用（系统相机组件代取，无相册/相机权限的运行时请求） -->
 	<key>NSCameraUsageDescription</key>
 	<string>用于拍摄书籍封面</string>
+	<!-- 微信登录/绑定：查询与拉起微信必需（SDK 要求三项全列） -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>weixin</string>
+		<string>weixinULAPI</string>
+		<string>wechat</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

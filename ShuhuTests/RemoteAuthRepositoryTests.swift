@@ -194,6 +194,125 @@ final class RemoteAuthRepositoryTests: XCTestCase {
         XCTAssertEqual(auth.currentAccessToken(), "acc-w")
     }
 
+    // ---- 真实微信登录（OpenSDK 授权码 → mobile_app 渠道）----
+
+    func testLoginWithWechat_postsRealCodeAndSetsShellSession() async throws {
+        MockURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/member/wechat/login")
+            let body = try? JSONSerialization.jsonObject(with: request.bodyData ?? Data()) as? [String: Any]
+            XCTAssertEqual(body?["channel"] as? String, "mobile_app")
+            XCTAssertEqual(body?["code"] as? String, "openid-auth-code", "必须携带 OpenSDK 授权码")
+            return TestResponses.ok(MemberLoginData(
+                accessToken: "acc-w", refreshToken: "ref-w", expiresIn: 3600,
+                member: MemberProfileData(
+                    id: 10, username: nil, phone: nil, nickname: "微信昵称",
+                    avatar: nil, invitationCode: nil, level: nil, expireAt: nil, createdAt: nil,
+                ),
+            ))
+        }
+
+        let member = try await auth.loginWithWechat(code: "openid-auth-code")
+
+        XCTAssertEqual(member.id, 10)
+        XCTAssertEqual(member.phone, "", "微信空壳账号未绑手机号，快照 phone 应为空串")
+        XCTAssertEqual(auth.currentAccessToken(), "acc-w")
+    }
+
+    // ---- 绑定/解绑微信（成功后刷新登录态快照）----
+
+    func testBindWechat_postsChannelAndCode_thenRefreshesProfileWithIdentity() async throws {
+        MockURLProtocol.handler = { _ in
+            TestResponses.ok(self.loginData(access: "acc-1", refresh: "ref-1"))
+        }
+        _ = try await auth.login(phone: "13800000001", password: "secret")
+
+        var paths: [String] = []
+        MockURLProtocol.handler = { request in
+            paths.append("\(request.httpMethod ?? "") \(request.url?.path ?? "")")
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/api/v1/member/wechat/bind"):
+                let body = try? JSONSerialization.jsonObject(with: request.bodyData ?? Data()) as? [String: Any]
+                XCTAssertEqual(body?["channel"] as? String, "mobile_app")
+                XCTAssertEqual(body?["code"] as? String, "bind-auth-code")
+                return TestResponses.okEmpty()
+            case ("GET", "/api/v1/member/me"):
+                return TestResponses.ok(MemberProfileData(
+                    id: 5, username: nil, phone: "13800000001", nickname: "张三",
+                    avatar: nil, invitationCode: nil, level: nil, expireAt: nil, createdAt: nil,
+                    wechatIdentities: [WechatIdentityData(id: 3, channel: "mobile_app", nickname: "微信昵称", avatar: "")],
+                ))
+            default:
+                return TestResponses.businessError(code: 404, message: "not found")
+            }
+        }
+
+        let member = try await auth.bindWechat(code: "bind-auth-code")
+
+        XCTAssertEqual(member.wechatIdentities.count, 1, "绑定后快照应携带微信身份")
+        XCTAssertEqual(member.wechatIdentities[0].channel, "mobile_app")
+        XCTAssertEqual(member.wechatIdentities[0].nickname, "微信昵称")
+        XCTAssertEqual(paths, ["POST /api/v1/member/wechat/bind", "GET /api/v1/member/me"], "绑定后拉最新资料刷新快照")
+    }
+
+    func testBindWechat_conflictSurfacesServerMessage() async throws {
+        MockURLProtocol.handler = { _ in
+            TestResponses.ok(self.loginData(access: "acc-1", refresh: "ref-1"))
+        }
+        _ = try await auth.login(phone: "13800000001", password: "secret")
+
+        MockURLProtocol.handler = { _ in
+            TestResponses.businessError(code: 409, message: "该微信已绑定账号 138****0001")
+        }
+
+        do {
+            _ = try await auth.bindWechat(code: "some-code")
+            XCTFail("ADR-0005 正式账号冲突应抛出")
+        } catch let error as ApiError {
+            XCTAssertEqual(error.message, "该微信已绑定账号 138****0001", "服务端脱敏提示直接展示")
+        }
+    }
+
+    func testUnbindWechat_postsIdentityId_thenRefreshesProfile() async throws {
+        MockURLProtocol.handler = { _ in
+            TestResponses.ok(self.loginData(access: "acc-1", refresh: "ref-1"))
+        }
+        _ = try await auth.login(phone: "13800000001", password: "secret")
+
+        var paths: [String] = []
+        MockURLProtocol.handler = { request in
+            paths.append("\(request.httpMethod ?? "") \(request.url?.path ?? "")")
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/api/v1/member/wechat/unbind"):
+                let body = try? JSONSerialization.jsonObject(with: request.bodyData ?? Data()) as? [String: Any]
+                XCTAssertEqual(body?["identityId"] as? Int64, 3)
+                return TestResponses.okEmpty()
+            case ("GET", "/api/v1/member/me"):
+                return TestResponses.ok(MemberProfileData(
+                    id: 5, username: nil, phone: "13800000001", nickname: "张三",
+                    avatar: nil, invitationCode: nil, level: nil, expireAt: nil, createdAt: nil,
+                ))
+            default:
+                return TestResponses.businessError(code: 404, message: "not found")
+            }
+        }
+
+        let member = try await auth.unbindWechat(identityId: 3)
+
+        XCTAssertTrue(member.wechatIdentities.isEmpty, "解绑后快照不应再有微信身份")
+        XCTAssertEqual(paths, ["POST /api/v1/member/wechat/unbind", "GET /api/v1/member/me"])
+    }
+
+    // ---- 快照兼容：老版本无 wechatIdentities 键解码为未绑定 ----
+
+    func testAuthMemberDecoding_toleratesLegacySnapshotWithoutWechatIdentities() throws {
+        let json = """
+        {"id":5,"phone":"13800000001","nickname":"张三","avatar":"","level":0}
+        """
+        let member = try JSONDecoder().decode(AuthMember.self, from: Data(json.utf8))
+        XCTAssertTrue(member.wechatIdentities.isEmpty)
+        XCTAssertEqual(member.displayName, "张三")
+    }
+
     // ---- 绑定手机号（成功后刷新登录态快照）----
 
     func testBindPhone_success_refreshesSessionSnapshot() async throws {

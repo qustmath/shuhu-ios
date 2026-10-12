@@ -38,6 +38,7 @@ struct HomeView: View {
     private let sync: SyncController
     private let adsClient: AdsClient
     private let membershipClient: MembershipClient
+    private let wechat: any WechatAuthCodeClient
     private let toast: ToastCenter
 
     @State private var books: [Book] = []
@@ -85,6 +86,7 @@ struct HomeView: View {
         sync: SyncController,
         adsClient: AdsClient,
         membershipClient: MembershipClient,
+        wechat: any WechatAuthCodeClient,
         toast: ToastCenter,
     ) {
         self.repository = repository
@@ -92,6 +94,7 @@ struct HomeView: View {
         self.sync = sync
         self.adsClient = adsClient
         self.membershipClient = membershipClient
+        self.wechat = wechat
         self.toast = toast
     }
 
@@ -208,6 +211,7 @@ struct HomeView: View {
                         repository: repository,
                         auth: auth,
                         sync: sync,
+                        wechat: wechat,
                         toast: toast,
                         onOpenMembership: { showMembership = true },
                         onOpenAbout: { navPath.append(.about) },

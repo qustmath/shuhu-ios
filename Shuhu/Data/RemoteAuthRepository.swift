@@ -63,6 +63,19 @@ public struct WechatLoginRequest: Encodable, Sendable {
     public let code: String
 }
 
+/// 解绑微信身份（服务端 MemberWechatUnbindRequest）。
+public struct WechatUnbindRequest: Encodable, Sendable {
+    public let identityId: Int64
+}
+
+/// 已绑定的微信身份概览（服务端 MemberWechatIdentityData）。
+public struct WechatIdentityData: Codable, Sendable {
+    public let id: Int64
+    public let channel: String
+    public let nickname: String?
+    public let avatar: String?
+}
+
 /// 更新个人资料请求。avatar 为 nil 时序列化省略该字段（不动头像）；只改昵称传 nil。
 public struct UpdateProfileRequest: Encodable, Sendable {
     public let nickname: String
@@ -85,6 +98,31 @@ public struct MemberProfileData: Codable, Sendable {
     public let level: Int?
     public let expireAt: String?
     public let createdAt: String?
+    public let wechatIdentities: [WechatIdentityData]?
+
+    public init(
+        id: Int64,
+        username: String?,
+        phone: String?,
+        nickname: String?,
+        avatar: String?,
+        invitationCode: String?,
+        level: Int?,
+        expireAt: String?,
+        createdAt: String?,
+        wechatIdentities: [WechatIdentityData]? = nil,
+    ) {
+        self.id = id
+        self.username = username
+        self.phone = phone
+        self.nickname = nickname
+        self.avatar = avatar
+        self.invitationCode = invitationCode
+        self.level = level
+        self.expireAt = expireAt
+        self.createdAt = createdAt
+        self.wechatIdentities = wechatIdentities
+    }
 }
 
 /// 登录/注册/刷新令牌/微信登录的统一返回：令牌 + 最新会员资料。
@@ -176,6 +214,13 @@ public final class RemoteAuthRepository: AuthRepository, @unchecked Sendable {
         return saveLogin(data)
     }
 
+    public func loginWithWechat(code: String) async throws -> AuthMember {
+        let data: MemberLoginData = try await publicClient
+            .post("api/v1/member/wechat/login", body: WechatLoginRequest(channel: "mobile_app", code: code))
+            .requireData()
+        return saveLogin(data)
+    }
+
     public func logout() async {
         if let refresh = tokenStore.tokens()?.refreshToken {
             let _: Envelope<EmptyData>? = try? await publicClient.post(
@@ -218,6 +263,25 @@ public final class RemoteAuthRepository: AuthRepository, @unchecked Sendable {
         tokenStore.saveProfile(member)
         session.send(member)
         return member
+    }
+
+    public func bindWechat(code: String) async throws -> AuthMember {
+        let envelope: Envelope<EmptyData> = try await memberClient.post(
+            "api/v1/member/wechat/bind",
+            body: WechatLoginRequest(channel: "mobile_app", code: code),
+        )
+        try envelope.requireOk()
+        // 绑定结果服务端不回数据，拉最新资料刷新快照（含微信绑定状态）
+        return try await refreshProfile()
+    }
+
+    public func unbindWechat(identityId: Int64) async throws -> AuthMember {
+        let envelope: Envelope<EmptyData> = try await memberClient.post(
+            "api/v1/member/wechat/unbind",
+            body: WechatUnbindRequest(identityId: identityId),
+        )
+        try envelope.requireOk()
+        return try await refreshProfile()
     }
 
     public func updateNickname(_ nickname: String) async throws -> AuthMember {
@@ -316,6 +380,9 @@ private extension AuthMember {
             avatar: profile.avatar ?? "",
             level: profile.level ?? 0,
             expireAt: profile.expireAt,
+            wechatIdentities: (profile.wechatIdentities ?? []).map {
+                WechatIdentityBrief(id: $0.id, channel: $0.channel, nickname: $0.nickname ?? "")
+            },
         )
     }
 }

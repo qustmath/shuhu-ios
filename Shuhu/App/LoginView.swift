@@ -26,6 +26,7 @@ struct LoginView: View {
     }
 
     private let auth: any AuthRepository
+    private let wechat: any WechatAuthCodeClient
     private let toast: ToastCenter
     private let onDone: () async -> Void
 
@@ -41,12 +42,20 @@ struct LoginView: View {
     @State private var codeSending = false
     @State private var codeCountdown = 0
     @State private var legalURL: URL?
+    /// 微信授权进行中（拉起微信期间防重复点击）。
+    @State private var wechatLoading = false
     #if DEBUG
     @State private var devCode = false
     #endif
 
-    init(auth: any AuthRepository, toast: ToastCenter, onDone: @escaping () async -> Void) {
+    init(
+        auth: any AuthRepository,
+        wechat: any WechatAuthCodeClient,
+        toast: ToastCenter,
+        onDone: @escaping () async -> Void,
+    ) {
         self.auth = auth
+        self.wechat = wechat
         self.toast = toast
         self.onDone = onDone
     }
@@ -115,12 +124,12 @@ struct LoginView: View {
             VStack(spacing: 6) {
                 PaperPrimaryButton(
                     text: submitText,
-                    isEnabled: !loading && (mode == .reset || agreed),
+                    isEnabled: !loading && (mode == .reset || (agreed && !phone.isEmpty && !password.isEmpty)),
                 ) {
                     Task { await submit() }
                 }
                 if mode == .login {
-                    HStack(spacing: 4) {
+                    HStack {
                         Button {
                             mode = .reset
                         } label: {
@@ -130,8 +139,7 @@ struct LoginView: View {
                                 .padding(10)
                         }
                         .buttonStyle(.plain)
-                        Text("·")
-                            .foregroundStyle(Paper.hairline)
+                        Spacer()
                         Button {
                             mode = .register
                         } label: {
@@ -141,6 +149,35 @@ struct LoginView: View {
                                 .padding(10)
                         }
                         .buttonStyle(.plain)
+                    }
+                    // ── 微信登录（对齐 Android：官方图形 + 协议未勾选先提示）──
+                    if wechat.canLogin {
+                        HairlineRule()
+                        VStack(spacing: 0) {
+                            Button {
+                                guard !loading, !wechatLoading else { return }
+                                guard agreed else {
+                                    toast.show("请先阅读并同意用户协议与隐私政策")
+                                    return
+                                }
+                                Task { await loginWithWechat() }
+                            } label: {
+                                VStack(spacing: 2) {
+                                    Image("WechatIcon")
+                                        .resizable()
+                                        .renderingMode(.original)
+                                        .frame(width: 26, height: 26)
+                                        .padding(9) // 触控区 44pt
+                                    Text("微信登录")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(Paper.inkMuted)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(loading || wechatLoading)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                        }
                     }
                 }
                 #if DEBUG
@@ -277,6 +314,22 @@ struct LoginView: View {
             )
         }
         // 重置成功回登录页（不进入登录态，用新密码重新登录）
+    }
+
+    /// 真实微信登录：拉起微信授权并等授权码，走移动应用渠道换登录态（ADR-0005 空壳/归一在服务端）。
+    private func loginWithWechat() async {
+        wechatLoading = true
+        do {
+            let code = try await wechat.requestAuthCode()
+            _ = try await auth.loginWithWechat(code: code)
+            wechatLoading = false
+            toast.show("登录成功")
+            dismiss()
+            await onDone()
+        } catch {
+            wechatLoading = false
+            toast.show(error.localizedDescription)
+        }
     }
 
     /// 开发联调：固定 dev 身份，重复登录进同一个测试会员（ADR-0009）。

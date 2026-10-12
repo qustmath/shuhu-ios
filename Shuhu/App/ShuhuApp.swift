@@ -11,6 +11,8 @@ final class AppContainer {
     let sync: SyncEngine
     let adsClient: AdsClient
     let membershipClient: MembershipClient
+    /// 微信授权码客户端（WechatAuthClient 单例；WXApi.registerApp 在其 init 完成）。
+    let wechat: WechatAuthCodeClient
     /// 全局轻提示（Android Toast 对应）。
     let toast = ToastCenter()
 
@@ -31,6 +33,7 @@ final class AppContainer {
             memberClient: authedClient,
             tokenStore: TokenStore(),
         )
+        wechat = WechatAuthClient(appId: WechatConfig.appId)
         let syncApi = SyncApi(client: authedClient)
         sync = SyncEngine(
             repository: inner,
@@ -76,6 +79,7 @@ struct ShuhuApp: App {
                         sync: container.sync,
                         adsClient: container.adsClient,
                         membershipClient: container.membershipClient,
+                        wechat: container.wechat,
                         toast: container.toast,
                     )
                     .task { container.bootstrap() }
@@ -84,6 +88,10 @@ struct ShuhuApp: App {
             }
             // odui 纸墨设计稿为固定亮色板（与 Android 单一 colorScheme 一致）
             .preferredColorScheme(.light)
+            // 微信授权回跳（Universal Link）交 SDK 解析 → WechatAuthClient.onResp
+            .onOpenURL { url in
+                container.wechat.handleOpen(url: url)
+            }
             .task { await fetchSplash() }
         }
     }

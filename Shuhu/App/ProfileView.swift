@@ -7,6 +7,7 @@ struct ProfileView: View {
     private let repository: any LibraryRepository
     private let auth: any AuthRepository
     private let sync: SyncController
+    private let wechat: any WechatAuthCodeClient
     private let toast: ToastCenter
     private let onOpenMembership: () -> Void
     private let onOpenAbout: () -> Void
@@ -21,6 +22,9 @@ struct ProfileView: View {
 
     @State private var showLogin = false
     @State private var showBindPhone = false
+    /// 微信绑定/解绑进行中（拉起微信授权期间防重复点击）；非 nil = 待确认解绑的身份
+    @State private var wechatBinding = false
+    @State private var unbindTarget: WechatIdentityBrief?
     @State private var showAvatarSheet = false
     @State private var editingName = false
     @State private var nameInput = ""
@@ -36,6 +40,7 @@ struct ProfileView: View {
         repository: any LibraryRepository,
         auth: any AuthRepository,
         sync: SyncController,
+        wechat: any WechatAuthCodeClient,
         toast: ToastCenter,
         onOpenMembership: @escaping () -> Void,
         onOpenAbout: @escaping () -> Void,
@@ -43,6 +48,7 @@ struct ProfileView: View {
         self.repository = repository
         self.auth = auth
         self.sync = sync
+        self.wechat = wechat
         self.toast = toast
         self.onOpenMembership = onOpenMembership
         self.onOpenAbout = onOpenAbout
@@ -72,6 +78,9 @@ struct ProfileView: View {
 
                     // ── 手机号 ──
                     phoneRow
+
+                    // ── 微信绑定 ──
+                    wechatRow
 
                     // ── 会员（仅登录后）──
                     if member != nil {
@@ -177,7 +186,7 @@ struct ProfileView: View {
             }
         }
         .sheet(isPresented: $showLogin) {
-            LoginView(auth: auth, toast: toast) {
+            LoginView(auth: auth, wechat: wechat, toast: toast) {
                 await refreshStats()
             }
         }
@@ -210,6 +219,22 @@ struct ProfileView: View {
                     : item.supportedContentTypes.contains(.webP) ? "webp" : "jpg"
                 updateAvatar(bytes: data, ext: ext)
             }
+        }
+        .alert(
+            "解除绑定微信",
+            isPresented: Binding(
+                get: { unbindTarget != nil },
+                set: { shown in if !shown { unbindTarget = nil } },
+            ),
+        ) {
+            Button("解绑", role: .destructive) {
+                if let target = unbindTarget { unbindWechat(target) }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text((member?.phone.isEmpty ?? true)
+                ? "解绑后将无法用该微信快捷登录本账号；当前账号未绑定手机号，解绑前请先绑定手机号。"
+                : "解绑后将无法用该微信快捷登录本账号，仍可用手机号+密码登录。")
         }
         .alert(
             "检测到账号切换",
@@ -397,6 +422,65 @@ struct ProfileView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             if member != nil { showBindPhone = true }
+        }
+    }
+
+    // ---- 微信绑定行 ----
+
+    @ViewBuilder
+    private var wechatRow: some View {
+        HairlineRule()
+        let identity = member?.wechatIdentities.first
+        SettingsRow(
+            title: "微信",
+            sub: member == nil
+                ? "登录后可绑定微信"
+                : (identity.map { "已绑定 \($0.nickname.isEmpty ? "微信用户" : $0.nickname)" }
+                    ?? "未绑定 · 绑定后可在其他设备用微信快捷登录"),
+            action: identity == nil ? "绑定" : "解绑",
+            actionAccent: false,
+            showChevron: true,
+            enabled: member != nil && !wechatBinding,
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard member != nil, !wechatBinding else { return }
+            if let identity = member?.wechatIdentities.first {
+                unbindTarget = identity
+            } else {
+                bindWechat()
+            }
+        }
+    }
+
+    // ---- 微信绑定/解绑动作 ----
+
+    private func bindWechat() {
+        guard !wechatBinding else { return }
+        wechatBinding = true
+        Task {
+            defer { wechatBinding = false }
+            do {
+                let code = try await wechat.requestAuthCode()
+                _ = try await auth.bindWechat(code: code)
+                toast.show("微信已绑定")
+            } catch {
+                toast.show(error.localizedDescription)
+            }
+        }
+    }
+
+    private func unbindWechat(_ target: WechatIdentityBrief) {
+        guard !wechatBinding else { return }
+        wechatBinding = true
+        Task {
+            defer { wechatBinding = false }
+            do {
+                _ = try await auth.unbindWechat(identityId: target.id)
+                toast.show("微信已解绑")
+            } catch {
+                toast.show(error.localizedDescription)
+            }
         }
     }
 
