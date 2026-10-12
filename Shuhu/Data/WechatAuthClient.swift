@@ -48,8 +48,8 @@ final class WechatAuthClient: NSObject, WechatAuthCodeClient {
     var canLogin: Bool { !appId.isEmpty && WXApi.isWXAppInstalled() }
 
     func requestAuthCode() async throws -> String {
-        guard !appId.isEmpty else { throw ApiError(nil, "微信登录暂未配置") }
-        guard WXApi.isWXAppInstalled() else { throw ApiError(nil, "未安装微信，无法使用微信登录") }
+        guard !appId.isEmpty else { throw ApiError(code: nil, "微信登录暂未配置") }
+        guard WXApi.isWXAppInstalled() else { throw ApiError(code: nil, "未安装微信，无法使用微信登录") }
 
         let state = UUID().uuidString
         return try await withCheckedThrowingContinuation { continuation in
@@ -58,13 +58,13 @@ final class WechatAuthClient: NSObject, WechatAuthCodeClient {
             req.scope = "snsapi_userinfo"
             req.state = state
             if !WXApi.send(req) {
-                failPending(ApiError(nil, "拉起微信失败，请稍后再试"))
+                failPending(ApiError(code: nil, "拉起微信失败，请稍后再试"))
                 return
             }
             // 超时看门狗：到期时 pendingAuth 已被回调取走则为空操作
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: Self.timeoutNanoseconds)
-                self?.failPending(ApiError(nil, "微信登录超时，请重试"))
+                self?.failPending(ApiError(code: nil, "微信登录超时，请重试"))
             }
         }
     }
@@ -101,12 +101,12 @@ extension WechatAuthClient: WXApiDelegate {
             if let code = auth.code, !code.isEmpty {
                 succeedPending(code)
             } else {
-                failPending(ApiError(nil, "微信授权失败，请重试"))
+                failPending(ApiError(code: nil, "微信授权失败，请重试"))
             }
         case -2:
-            failPending(ApiError(nil, "已取消微信登录"))
+            failPending(ApiError(code: nil, "已取消微信登录"))
         default:
-            failPending(ApiError(nil, "微信授权失败（错误码 \(auth.errCode)）"))
+            failPending(ApiError(code: nil, "微信授权失败（错误码 \(auth.errCode)）"))
         }
     }
 }
