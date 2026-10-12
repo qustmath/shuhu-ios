@@ -57,9 +57,10 @@ final class WechatAuthClient: NSObject, WechatAuthCodeClient {
             let req = SendAuthReq()
             req.scope = "snsapi_userinfo"
             req.state = state
-            if !WXApi.send(req) {
-                failPending(ApiError(code: nil, "拉起微信失败，请稍后再试"))
-                return
+            // SDK 的 sendReq 只有 async 形态（completion 导入，无同步失败信号）：
+            // 发起即可，失败路径由 onResp（errCode）或超时看门狗收敛
+            Task {
+                _ = await WXApi.send(req)
             }
             // 超时看门狗：到期时 pendingAuth 已被回调取走则为空操作
             Task { [weak self] in
