@@ -18,7 +18,7 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.1"
+    MARKETING_VERSION: "1.2"
     CURRENT_PROJECT_VERSION: "1"
     # Apple Developer Program Team ID（微信 iPhone 应用登记、签名、AASA 三方共用）
     DEVELOPMENT_TEAM: RHXA5ZS73K
