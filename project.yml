@@ -41,6 +41,10 @@ targets:
       - package: GRDB
       - package: WechatOpenSDK
         product: WechatOpenSDK
+        # 该包实为静态库（.a），必须链进主执行文件。embed 缺省为 true 时 Xcode
+        # 生成的 WechatOpenSDK.framework 带有高于 app 部署目标的 MinimumOSVersion，
+        # App Store 校验拒收 ITMS-90208（2026-10-13 TestFlight 1.2(24) 实测）。
+        embed: false
     settings:
       base:
         # 与 Android 包名一致（微信开放平台 iPhone 应用登记值，勿改）
