@@ -82,7 +82,7 @@ public struct FeedbackClient: Sendable {
 
     /// 我的反馈列表（仅本人，id 倒序；服务端钳制 page≥1、pageSize≤20）。
     public func myList(page: Int, pageSize: Int = 20) async throws -> FeedbackListData {
-        try await client.get(
+        let data: FeedbackListData = try await client.get(
             "api/v1/mods/feedback",
             query: [
                 URLQueryItem(name: "page", value: String(page)),
@@ -90,6 +90,7 @@ public struct FeedbackClient: Sendable {
             ],
             timeout: timeout,
         ).requireData()
+        return data
     }
 
     /// 上传一张截图（服务端校验大小/类型，未配置存储时返回可读错误），返回图片 URL。
@@ -100,7 +101,7 @@ public struct FeedbackClient: Sendable {
             filename: "feedback.\(fileExtension)",
             mimeType: "image/jpeg",
             bytes: bytes,
-        )
+        ).requireData()
         guard let url = data.url, !url.isEmpty else {
             throw ApiError(code: nil, "服务器错误，请稍后再试")
         }
