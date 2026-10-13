@@ -5,15 +5,14 @@ options:
     iOS: "17.0"
   createIntermediateGroups: true
 
-# 依赖（SPM）：GRDB = SQLite 的 Swift 封装（迁移/事务/并发模型与 Android Room 同构）；
-# WechatOpenSDK = 微信开放 SDK 的 XCFramework SPM 包装（社区同步官方 CocoaPods 二进制，票 02）
+# 依赖（SPM）：GRDB = SQLite 的 Swift 封装（迁移/事务/并发模型与 Android Room 同构）。
+# 微信 SDK 不走 SPM：该包（yanyin1986/WechatOpenSDK）实为静态库，Xcode 会把 SPM
+# binaryTarget 自动包成嵌入 framework，其 MinimumOSVersion 高于 app 部署目标，
+# App Store 校验拒收 ITMS-90208（2026-10-13 两轮实测）——改为 Vendor/ 直接链静态库。
 packages:
   GRDB:
     url: https://github.com/groue/GRDB.swift
     exactVersion: 6.29.3
-  WechatOpenSDK:
-    url: https://github.com/yanyin1986/WechatOpenSDK
-    from: 2.0.4
 
 settings:
   base:
@@ -29,6 +28,9 @@ targets:
     platform: iOS
     sources:
       - Shuhu
+      # SDK 静态库不进包，其隐私清单需作为 app 资源提供
+      - path: Vendor/WechatOpenSDK/PrivacyInfo.xcprivacy
+        buildPhase: resources
     # Universal Links 关联域（微信授权回跳用）：与微信开放平台后台登记值、
     # 服务器 /var/www/apple/.well-known/apple-app-site-association 三方一致，勿改。
     # ⚠️ Release 手动签名的描述文件必须重建并带 Associated Domains 能力，否则归档失败。
@@ -39,12 +41,16 @@ targets:
           - applinks:rrapi.groovyu.com
     dependencies:
       - package: GRDB
-      - package: WechatOpenSDK
-        product: WechatOpenSDK
-        # 该包实为静态库（.a），必须链进主执行文件。embed 缺省为 true 时 Xcode
-        # 生成的 WechatOpenSDK.framework 带有高于 app 部署目标的 MinimumOSVersion，
-        # App Store 校验拒收 ITMS-90208（2026-10-13 TestFlight 1.2(24) 实测）。
-        embed: false
+      # 微信静态库依赖的系统框架与系统库（SDK README 历年要求 + WKWebView/C++ 运行时）
+      - sdk: SystemConfiguration.framework
+      - sdk: CoreTelephony.framework
+      - sdk: CFNetwork.framework
+      - sdk: Security.framework
+      - sdk: WebKit.framework
+      - sdk: JavaScriptCore.framework
+      - sdk: libz.tbd
+      - sdk: libsqlite3.tbd
+      - sdk: libc++.tbd
     settings:
       base:
         # 与 Android 包名一致（微信开放平台 iPhone 应用登记值，勿改）
@@ -53,6 +59,11 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: NO
+        # 微信 SDK：Vendor 静态库 + 手写 Clang module（Swift 侧 `import WechatOpenSDK` 不变）。
+        # 静态库链进主执行文件，不产生任何嵌入 framework。
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/Vendor/WechatOpenSDK"
+        LIBRARY_SEARCH_PATHS: "$(SRCROOT)/Vendor/WechatOpenSDK"
+        OTHER_LDFLAGS: "$(inherited) -ObjC -lWechatOpenSDK"
       configs:
         # 手动签名仅作用于 App 目标（SPM 依赖 GRDB 不支持描述文件，保持 Automatic）；
         # 证书与描述文件来自 ASC API 预创建资产（CI Secrets 注入）

@@ -1,0 +1,4 @@
+module WechatOpenSDK {
+    umbrella "Headers"
+    export *
+}
