@@ -444,6 +444,7 @@ struct ProfileView: View {
 
     // ---- 密码行（仅未设密码的微信注册账号显示）----
 
+    @ViewBuilder
     private var setPasswordRow: some View {
         HairlineRule()
         SettingsRow(
