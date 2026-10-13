@@ -22,6 +22,7 @@ struct ProfileView: View {
 
     @State private var showLogin = false
     @State private var showBindPhone = false
+    @State private var showSetPassword = false
     /// 微信绑定/解绑进行中（拉起微信授权期间防重复点击）；非 nil = 待确认解绑的身份
     @State private var wechatBinding = false
     @State private var unbindTarget: WechatIdentityBrief?
@@ -78,6 +79,11 @@ struct ProfileView: View {
 
                     // ── 手机号 ──
                     phoneRow
+
+                    // ── 密码（仅未设密码时出现：微信空壳账号解绑微信前须先设密码）──
+                    if member?.hasPassword == false {
+                        setPasswordRow
+                    }
 
                     // ── 微信绑定 ──
                     wechatRow
@@ -203,6 +209,9 @@ struct ProfileView: View {
                 }
             }
         }
+        .sheet(isPresented: $showSetPassword) {
+            SetPasswordView(auth: auth, toast: toast)
+        }
         .sheet(isPresented: $showAvatarSheet) {
             avatarPickSheet
                 .presentationDetents([.height(240)])
@@ -240,7 +249,9 @@ struct ProfileView: View {
         } message: {
             Text((member?.phone.isEmpty ?? true)
                 ? "解绑后将无法用该微信快捷登录本账号；当前账号未绑定手机号，解绑前请先绑定手机号。"
-                : "解绑后将无法用该微信快捷登录本账号，仍可用手机号+密码登录。")
+                : (member?.hasPassword ?? false)
+                    ? "解绑后将无法用该微信快捷登录本账号，仍可用手机号+密码登录。"
+                    : "解绑后将无法用该微信快捷登录本账号；当前账号未设置密码，手机号暂不能单独登录，请先设置密码再解绑。")
         }
         .alert(
             "检测到账号切换",
@@ -428,6 +439,24 @@ struct ProfileView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             if member != nil { showBindPhone = true }
+        }
+    }
+
+    // ---- 密码行（仅未设密码的微信注册账号显示）----
+
+    private var setPasswordRow: some View {
+        HairlineRule()
+        SettingsRow(
+            title: "密码",
+            sub: "未设置 · 设置后可用手机号+密码登录，解绑微信前需先设置",
+            action: "设置",
+            actionAccent: false,
+            showChevron: true,
+            enabled: member != nil,
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if member != nil { showSetPassword = true }
         }
     }
 

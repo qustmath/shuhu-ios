@@ -68,6 +68,11 @@ public struct WechatUnbindRequest: Encodable, Sendable {
     public let identityId: Int64
 }
 
+/// 微信注册会员首次设置密码（服务端 MemberSetPasswordRequest）。
+public struct SetPasswordRequest: Encodable, Sendable {
+    public let newPassword: String
+}
+
 /// 已绑定的微信身份概览（服务端 MemberWechatIdentityData）。
 public struct WechatIdentityData: Codable, Sendable {
     public let id: Int64
@@ -99,6 +104,7 @@ public struct MemberProfileData: Codable, Sendable {
     public let expireAt: String?
     public let createdAt: String?
     public let wechatIdentities: [WechatIdentityData]?
+    public let hasPassword: Bool?
 
     public init(
         id: Int64,
@@ -111,6 +117,7 @@ public struct MemberProfileData: Codable, Sendable {
         expireAt: String?,
         createdAt: String?,
         wechatIdentities: [WechatIdentityData]? = nil,
+        hasPassword: Bool? = nil,
     ) {
         self.id = id
         self.username = username
@@ -122,6 +129,7 @@ public struct MemberProfileData: Codable, Sendable {
         self.expireAt = expireAt
         self.createdAt = createdAt
         self.wechatIdentities = wechatIdentities
+        self.hasPassword = hasPassword
     }
 }
 
@@ -284,6 +292,16 @@ public final class RemoteAuthRepository: AuthRepository, @unchecked Sendable {
         return try await refreshProfile()
     }
 
+    public func setPassword(_ newPassword: String) async throws -> AuthMember {
+        let envelope: Envelope<EmptyData> = try await memberClient.put(
+            "api/v1/member/password/set",
+            body: SetPasswordRequest(newPassword: newPassword),
+        )
+        try envelope.requireOk()
+        // 服务端不回数据，拉最新资料刷新快照（hasPassword 翻转）
+        return try await refreshProfile()
+    }
+
     public func updateNickname(_ nickname: String) async throws -> AuthMember {
         let trimmed = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw ApiError("昵称不能为空") }
@@ -383,6 +401,7 @@ private extension AuthMember {
             wechatIdentities: (profile.wechatIdentities ?? []).map {
                 WechatIdentityBrief(id: $0.id, channel: $0.channel, nickname: $0.nickname ?? "")
             },
+            hasPassword: profile.hasPassword ?? false,
         )
     }
 }

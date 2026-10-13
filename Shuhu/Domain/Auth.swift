@@ -27,10 +27,12 @@ public struct AuthMember: Equatable, Hashable, Sendable {
     public let expireAt: String?
     /// 已绑定的微信身份；空数组 = 未绑定微信。
     public let wechatIdentities: [WechatIdentityBrief]
+    /// 是否已设密码：未设密码时微信是唯一登录方式，解绑会被服务端拒绝。
+    public let hasPassword: Bool
 
     public init(
         id: Int64, phone: String, nickname: String, avatar: String = "", level: Int = 0,
-        expireAt: String? = nil, wechatIdentities: [WechatIdentityBrief] = [],
+        expireAt: String? = nil, wechatIdentities: [WechatIdentityBrief] = [], hasPassword: Bool = false,
     ) {
         self.id = id
         self.phone = phone
@@ -39,6 +41,7 @@ public struct AuthMember: Equatable, Hashable, Sendable {
         self.level = level
         self.expireAt = expireAt
         self.wechatIdentities = wechatIdentities
+        self.hasPassword = hasPassword
     }
 
     /// 展示名：优先昵称（用户自取的名字），无昵称回落手机号，最后兜底「微信用户」。
@@ -85,7 +88,7 @@ public struct AuthMember: Equatable, Hashable, Sendable {
 /// 避免升级后本地登录态被误判失效。
 extension AuthMember: Codable {
     private enum CodingKeys: String, CodingKey {
-        case id, phone, nickname, avatar, level, expireAt, wechatIdentities
+        case id, phone, nickname, avatar, level, expireAt, wechatIdentities, hasPassword
     }
 
     public init(from decoder: Decoder) throws {
@@ -98,6 +101,8 @@ extension AuthMember: Codable {
         expireAt = try container.decodeIfPresent(String.self, forKey: .expireAt)
         // 老版本快照无此键 → 未绑定（与 avatar/level 的兼容口径一致）
         wechatIdentities = try container.decodeIfPresent([WechatIdentityBrief].self, forKey: .wechatIdentities) ?? []
+        // 老版本快照无此键 → 未设密码（保守口径：不误导解绑）
+        hasPassword = try container.decodeIfPresent(Bool.self, forKey: .hasPassword) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -109,6 +114,7 @@ extension AuthMember: Codable {
         try container.encode(level, forKey: .level)
         try container.encodeIfPresent(expireAt, forKey: .expireAt)
         try container.encode(wechatIdentities, forKey: .wechatIdentities)
+        try container.encode(hasPassword, forKey: .hasPassword)
     }
 }
 
@@ -177,6 +183,9 @@ public protocol AuthRepository: AnyObject {
 
     /// 解绑指定微信身份；服务端校验解绑后仍有可用登录方式，违规拒绝。成功后刷新快照。
     func unbindWechat(identityId: Int64) async throws -> AuthMember
+
+    /// 微信注册会员首次设置密码（已设密码走登出后的重置密码流程）。成功后刷新快照。
+    func setPassword(_ newPassword: String) async throws -> AuthMember
 
     /// 登出：撤销服务端会话并清空本地登录态；本地数据不受影响。
     func logout() async
