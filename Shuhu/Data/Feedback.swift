@@ -73,11 +73,13 @@ public struct FeedbackClient: Sendable {
 
     /// 提交反馈：截图先经 `upload` 换取 URL 再随单提交。每会员每日限 5 条（超限服务端 429）。
     public func submit(type: String, content: String, contact: String, images: [String]) async throws {
-        try await client.post(
+        // create 端点 data 为 null，用 EmptyData 显式定型信封（requireOk 不参与 T 推断）
+        let envelope: Envelope<EmptyData> = try await client.post(
             "api/v1/mods/feedback",
             body: FeedbackSubmitRequest(type: type, content: content, contact: contact, images: images),
             timeout: timeout,
-        ).requireOk()
+        )
+        try envelope.requireOk()
     }
 
     /// 我的反馈列表（仅本人，id 倒序；服务端钳制 page≥1、pageSize≤20）。
