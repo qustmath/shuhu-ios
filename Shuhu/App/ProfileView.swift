@@ -10,6 +10,7 @@ struct ProfileView: View {
     private let wechat: any WechatAuthCodeClient
     private let toast: ToastCenter
     private let onOpenMembership: () -> Void
+    private let onOpenFeedback: () -> Void
     private let onOpenAbout: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -44,6 +45,7 @@ struct ProfileView: View {
         wechat: any WechatAuthCodeClient,
         toast: ToastCenter,
         onOpenMembership: @escaping () -> Void,
+        onOpenFeedback: @escaping () -> Void,
         onOpenAbout: @escaping () -> Void,
     ) {
         self.repository = repository
@@ -52,6 +54,7 @@ struct ProfileView: View {
         self.wechat = wechat
         self.toast = toast
         self.onOpenMembership = onOpenMembership
+        self.onOpenFeedback = onOpenFeedback
         self.onOpenAbout = onOpenAbout
     }
 
@@ -129,6 +132,24 @@ struct ProfileView: View {
                         }
                         .padding(.horizontal, 22)
                         .padding(.vertical, 15)
+                    }
+                    // ── 建议与反馈（仅登录后，feedback mod 端点要求会员身份）──
+                    if member != nil {
+                        Button(action: onOpenFeedback) {
+                            HStack {
+                                Text("建议与反馈")
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(Paper.ink)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Paper.inkMuted)
+                            }
+                            .padding(.horizontal, 22)
+                            .padding(.vertical, 15)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
                     HairlineRule()
 

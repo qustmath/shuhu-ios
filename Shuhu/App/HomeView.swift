@@ -38,6 +38,7 @@ struct HomeView: View {
     private let sync: SyncController
     private let adsClient: AdsClient
     private let membershipClient: MembershipClient
+    private let feedbackClient: FeedbackClient
     private let wechat: any WechatAuthCodeClient
     private let toast: ToastCenter
 
@@ -54,6 +55,7 @@ struct HomeView: View {
     @State private var navPath: [AppRoute] = []
     @State private var showAddBook = false
     @State private var showMembership = false
+    @State private var showFeedback = false
     @SceneStorage("home.finishedExpanded") private var finishedExpanded = false
 
     // ---- 拖动排序（拖动期布局冻结，只做视觉位移；松手才落库）----
@@ -86,6 +88,7 @@ struct HomeView: View {
         sync: SyncController,
         adsClient: AdsClient,
         membershipClient: MembershipClient,
+        feedbackClient: FeedbackClient,
         wechat: any WechatAuthCodeClient,
         toast: ToastCenter,
     ) {
@@ -94,6 +97,7 @@ struct HomeView: View {
         self.sync = sync
         self.adsClient = adsClient
         self.membershipClient = membershipClient
+        self.feedbackClient = feedbackClient
         self.wechat = wechat
         self.toast = toast
     }
@@ -214,6 +218,7 @@ struct HomeView: View {
                         wechat: wechat,
                         toast: toast,
                         onOpenMembership: { showMembership = true },
+                        onOpenFeedback: { showFeedback = true },
                         onOpenAbout: { navPath.append(.about) },
                     )
                     .toolbar(.hidden, for: .navigationBar)
@@ -241,6 +246,14 @@ struct HomeView: View {
                         }
                     },
                     onClose: { showMembership = false },
+                )
+                .presentationDragIndicator(.hidden)
+            }
+            .sheet(isPresented: $showFeedback) {
+                FeedbackView(
+                    client: feedbackClient,
+                    toast: toast,
+                    onClose: { showFeedback = false },
                 )
                 .presentationDragIndicator(.hidden)
             }

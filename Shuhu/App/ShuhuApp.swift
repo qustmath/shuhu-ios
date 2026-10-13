@@ -11,6 +11,7 @@ final class AppContainer {
     let sync: SyncEngine
     let adsClient: AdsClient
     let membershipClient: MembershipClient
+    let feedbackClient: FeedbackClient
     /// 微信授权码客户端（WechatAuthClient 单例；WXApi.registerApp 在其 init 完成）。
     let wechat: WechatAuthCodeClient
     /// 全局轻提示（Android Toast 对应）。
@@ -46,6 +47,7 @@ final class AppContainer {
         // 广告走 authed 客户端（登录态自动带 token；匿名/失效均被服务端匿名放行）
         adsClient = AdsClient(api: AdsApi(client: authedClient))
         membershipClient = MembershipClient(client: authedClient)
+        feedbackClient = FeedbackClient(client: authedClient)
     }
 
     /// 启动时恢复登录态并启动同步引擎（视图 .task 调用；engine.start 幂等）。
@@ -79,6 +81,7 @@ struct ShuhuApp: App {
                         sync: container.sync,
                         adsClient: container.adsClient,
                         membershipClient: container.membershipClient,
+                        feedbackClient: container.feedbackClient,
                         wechat: container.wechat,
                         toast: container.toast,
                     )
