@@ -208,6 +208,8 @@ struct LoginView: View {
             .padding(.bottom, 8)
         }
         .background(Paper.bg.ignoresSafeArea())
+        // sheet 层级高于根视图挂载的 ToastOverlay，页内提示需自挂一份
+        .overlay { ToastOverlay(center: toast) }
         .sheet(isPresented: Binding(
             get: { legalURL != nil },
             set: { if !$0 { legalURL = nil } },

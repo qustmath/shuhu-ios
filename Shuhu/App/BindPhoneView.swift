@@ -106,6 +106,8 @@ struct BindPhoneView: View {
             .padding(.vertical, 12)
         }
         .background(Paper.bg.ignoresSafeArea())
+        // sheet 层级高于根视图挂载的 ToastOverlay，页内提示需自挂一份
+        .overlay { ToastOverlay(center: toast) }
     }
 
     // ---- 动作 ----

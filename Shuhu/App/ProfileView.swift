@@ -177,6 +177,12 @@ struct ProfileView: View {
         .background(Paper.bg.ignoresSafeArea())
         .task { await reload() }
         .onReceive(auth.session) { member = $0 }
+        .task {
+            // 兜底：旧版登录响应的会话快照不带微信身份，进页拉一次最新资料
+            if auth.session.value != nil {
+                try? await auth.refreshProfile()
+            }
+        }
         .onReceive(sync.syncing) { syncing = $0 }
         .onReceive(sync.lastSyncAt) { lastSyncAt = $0 }
         .onReceive(sync.pendingSwitchAccount) { value in
