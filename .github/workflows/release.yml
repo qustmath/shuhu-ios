@@ -54,7 +54,8 @@ jobs:
             -T /usr/bin/codesign -T /usr/bin/security
           security set-key-partition-list -S apple-tool:,apple: -s -k ci-pass build.keychain \
             >/dev/null
-          PROFILE_UUID="48ba2855-56c5-45c0-8ddd-f8d4badf4f62"
+          # 2026-10-13 重建描述文件（加关联域能力）后 UUID 更新；旧 48ba2855 已弃用
+          PROFILE_UUID="15a48d54-cb9a-42fb-a665-d8c8d60cf43e"
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           echo "$DIST_PROFILE_B64" | base64 --decode \
             > "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
