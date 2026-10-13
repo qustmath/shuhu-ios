@@ -28,9 +28,9 @@ targets:
     platform: iOS
     sources:
       - Shuhu
-      # SDK 静态库不进包，其隐私清单需作为 app 资源提供
-      - path: Vendor/WechatOpenSDK/PrivacyInfo.xcprivacy
-        buildPhase: resources
+      # 说明：SDK 自带的 PrivacyInfo.xcprivacy 不作为资源加入——app 的
+      # Shuhu/PrivacyInfo.xcprivacy 已声明 SDK 清单里唯一条目（UserDefaults/CA92.1），
+      # 重复加入会因同名产物冲突直接 Archive 失败（2026-10-13 …c 轮实测）。
     # Universal Links 关联域（微信授权回跳用）：与微信开放平台后台登记值、
     # 服务器 /var/www/apple/.well-known/apple-app-site-association 三方一致，勿改。
     # ⚠️ Release 手动签名的描述文件必须重建并带 Associated Domains 能力，否则归档失败。
