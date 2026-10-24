@@ -212,7 +212,8 @@ struct MembershipView: View {
             switch result {
             case .success(let verification):
                 // 验签解包：未通过验证的交易一律视为无效（内联 switch，不点名 Verification 类型）
-                let transaction: Transaction
+                // Transaction 显式限定 StoreKit：SwiftUI 同名类型（动画事务）在此作用域撞名
+                let transaction: StoreKit.Transaction
                 switch verification {
                 case .verified(let safe):
                     transaction = safe
@@ -247,7 +248,7 @@ struct MembershipView: View {
     /// （保持未完成，restore/人工核验处理）。
     private func replayUnfinishedPurchases() async {
         for await result in Transaction.unfinished {
-            let transaction: Transaction
+            let transaction: StoreKit.Transaction
             switch result {
             case .verified(let safe):
                 transaction = safe
