@@ -231,7 +231,7 @@ struct MembershipView: View {
                 case .unverified:
                     throw ApiError(code: nil, "交易凭证验证失败")
                 }
-                try await verifyFinishAndRefresh(payNo: payNo, transaction: transaction)
+                await verifyFinishAndRefresh(payNo: payNo, transaction: transaction)
             case .userCancelled:
                 toast.show("已取消支付")
             case .pending:
@@ -245,19 +245,20 @@ struct MembershipView: View {
         }
     }
 
-    /// verify → finish → refresh（S-C8 顺序修正）：finish 在前，但刷新失败**不走失败
-    /// 分支**——权益已生效，软提示后照常成功回调，避免诱导重复支付。
-    private func verifyFinishAndRefresh(payNo: String, transaction: StoreKit.Transaction) async throws {
-        // ④ 服务端验证成功后才 finish（过早 finish 验证失败将无法补拿凭证）
-        let status = try await client.verify(payNo: payNo, transactionId: "\(transaction.id)")
-        guard status == "success" else {
+    /// verify → finish → refresh（走 IAPRecovery 共享实现，R4——410 清留存与后台
+    /// 重放行为一致）。S-C8：刷新失败软提示照常成功回调，不诱导重复支付。
+    private func verifyFinishAndRefresh(payNo: String, transaction: StoreKit.Transaction) async {
+        switch await recovery.verifyAndSettle(payNo: payNo, transaction: transaction) {
+        case .fulfilled:
+            await refreshAndComplete()
+        case .dispatchPending:
             // 服务端已确认但分发未完成：交易保持未完成，app 级重放会补 finish
             toast.show("支付确认中，会员权益稍后自动生效")
-            return
+        case .expiredOrder:
+            toast.show("支付单已过期，请重新下单")
+        case .failed(let error):
+            toast.show(Self.verifyErrorMessage(error))
         }
-        pendingStore.remove(payNo: payNo)
-        await transaction.finish()
-        await refreshAndComplete()
     }
 
     private func refreshAndComplete() async {

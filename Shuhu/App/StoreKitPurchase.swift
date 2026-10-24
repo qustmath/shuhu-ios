@@ -44,7 +44,10 @@ struct KeychainStore: SecureKVStore {
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
         ]
-        SecItemDelete(query as CFDictionary)
+        // 先 update 后 add（R7）：先删后加在 add 失败时会丢旧值
+        let update: [String: Any] = [kSecValueData as String: data]
+        let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+        guard status == errSecItemNotFound else { return }
         var attributes = query
         attributes[kSecValueData as String] = data
         attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
@@ -130,6 +133,23 @@ struct PendingPurchaseStore: Sendable {
 }
 
 // ---------------------------------------------------------------------------
+// 交易句柄接缝（修复复核 R6）：IAPRecovery 的编排逻辑面向本接缝编写，生产由
+// StoreKit.Transaction 适配、测试注入内存实现——不依赖不可构造的 StoreKit 类型。
+protocol IAPTransactionHandle: Sendable {
+    var transactionID: String { get }
+    var accountToken: UUID? { get }
+    var storeProductID: String { get }
+    func markFinished() async
+}
+
+extension StoreKit.Transaction: IAPTransactionHandle {
+    var transactionID: String { "\(id)" }
+    var accountToken: UUID? { appAccountToken }
+    var storeProductID: String { productID }
+    func markFinished() async { await finish() }
+}
+
+// ---------------------------------------------------------------------------
 // 恢复编排（契约 §2.1-5，审查 S-C2/S-C4）：app 级常驻——启动遍历未完成交易重放
 // verify + 监听 Transaction.updates（家长批准等异步交易落地的唯一入口，重进页面
 // 才处理是不实承诺）。归属判定：appAccountToken 匹配本地留存单直接重放；对不上的
@@ -171,7 +191,7 @@ final class IAPRecovery {
             case .unverified:
                 continue
             }
-            if await handle(transaction) {
+            if await settle(transaction: transaction) {
                 fulfilled += 1
             }
         }
@@ -187,14 +207,14 @@ final class IAPRecovery {
             case .unverified:
                 continue
             }
-            await handle(transaction)
+            await settle(transaction: transaction)
         }
     }
 
     /// 认领一笔未完成交易：找单（本地留存 → 孤儿领养）→ verify → finish → 刷快照。
     /// 返回是否完成履约确认。
-    private func handle(_ transaction: StoreKit.Transaction) async -> Bool {
-        guard let token = transaction.appAccountToken?.uuidString else { return false }
+    private func settle(transaction: any IAPTransactionHandle) async -> Bool {
+        guard let token = transaction.accountToken?.uuidString else { return false }
         var pending = pendingStore.pending(appAccountToken: token)
         if pending == nil {
             // 孤儿交易：本地对不上（重装/清数据）——按交易自带 token 走服务端台账找回
@@ -202,43 +222,64 @@ final class IAPRecovery {
             pending = await adoptOrphan(transaction: transaction, token: token)
         }
         guard let pending else { return false }
-        return await verifyAndFinish(pending: pending, transaction: transaction)
+        switch await verifyAndSettle(payNo: pending.payNo, transaction: transaction) {
+        case .fulfilled:
+            return true
+        default:
+            return false
+        }
     }
 
     /// restore 找回台账：只认 status=success 且 transactionId 一致的记录（refunded 不得补发）；
     /// needs_manual_review 是隐私边界（零交易字段），保持未完成等人工核验。
-    private func adoptOrphan(transaction: StoreKit.Transaction, token: String) async -> PendingPurchase? {
+    private func adoptOrphan(transaction: any IAPTransactionHandle, token: String) async -> PendingPurchase? {
         guard let data = try? await client.restore(appAccountToken: token),
               let records = data.transactions,
-              let match = records.first(where: {
-                  $0.status == "success" && $0.transactionId == "\(transaction.id)"
-              }),
+              let match = Self.adoptableRecord(in: records, transactionId: transaction.transactionID),
               let payNo = match.payNo, !payNo.isEmpty
         else { return nil }
         let pending = PendingPurchase(
             payNo: payNo,
             appAccountToken: token,
-            productId: match.productId ?? transaction.productID,
+            productId: match.productId ?? transaction.storeProductID,
             createdAt: .now,
         )
         pendingStore.save(pending)
         return pending
     }
 
-    private func verifyAndFinish(pending: PendingPurchase, transaction: StoreKit.Transaction) async -> Bool {
+    /// 领养筛选（纯函数，R6 测试点）：只认 success 且 transactionId 一致。放宽到
+    /// created/paying 依赖主线票 17（success 分支交易身份校验）修复，放宽前从严。
+    static func adoptableRecord(
+        in records: [RestoreTransactionData],
+        transactionId: String,
+    ) -> RestoreTransactionData? {
+        records.first { $0.status == "success" && $0.transactionId == transactionId }
+    }
+
+    enum VerifyOutcome {
+        case fulfilled        // verify 成功 + finish 完成
+        case dispatchPending  // 服务端已确认但分发未完成（交易保持未完成）
+        case expiredOrder     // 410：留存已清，换单重下
+        case failed(Error)
+    }
+
+    /// verify → finish → 清留存（交互式购买与后台重放共用的唯一实现，审查 R4——
+    /// 410 清留存收敛在此，两条路径行为一致）。
+    func verifyAndSettle(payNo: String, transaction: any IAPTransactionHandle) async -> VerifyOutcome {
         do {
-            let status = try await client.verify(payNo: pending.payNo, transactionId: "\(transaction.id)")
-            guard status == "success" else { return false } // 分发未完成：保持未完成下轮重放
-            pendingStore.remove(payNo: pending.payNo)
-            await transaction.finish()
+            let status = try await client.verify(payNo: payNo, transactionId: transaction.transactionID)
+            guard status == "success" else { return .dispatchPending }
+            pendingStore.remove(payNo: payNo)
+            await transaction.markFinished()
             _ = try? await auth.refreshProfile()
-            return true
+            return .fulfilled
         } catch let apiError as ApiError where apiError.code == 410 {
             // 410 订单过期且交易不匹配：换单重下——清掉本地留存（S-C5，否则重放永久撞 410）
-            pendingStore.remove(payNo: pending.payNo)
-            return false
+            pendingStore.remove(payNo: payNo)
+            return .expiredOrder
         } catch {
-            return false // 网络/5xx 等：保持未完成，下轮/updates 再试
+            return .failed(error) // 网络/5xx 等：保持未完成，下轮/updates 再试
         }
     }
 }
