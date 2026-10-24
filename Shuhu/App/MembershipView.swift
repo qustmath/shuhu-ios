@@ -14,8 +14,10 @@ struct MembershipView: View {
     /// 购买成功回调（调用方关页 + 跳设置页 + 成功提示）。
     private let onPurchased: () -> Void
     private let onClose: () -> Void
-    /// 未完成支付单持久化（先单后买契约 §2.1-2）。
-    private let pendingStore = PendingPurchaseStore()
+    /// 未完成支付单持久化（先单后买契约 §2.1-2，Keychain 跨重装）。
+    private let pendingStore: PendingPurchaseStore
+    /// app 级恢复编排（启动重放 + updates 监听；恢复购买复用其 replay）。
+    private let recovery: IAPRecovery
 
     @State private var member: AuthMember?
     @State private var plans: [MemberPlanData]?
@@ -28,12 +30,15 @@ struct MembershipView: View {
         client: MembershipClient,
         auth: any AuthRepository,
         toast: ToastCenter,
+        recovery: IAPRecovery,
         onPurchased: @escaping () -> Void,
         onClose: @escaping () -> Void,
     ) {
         self.client = client
         self.auth = auth
         self.toast = toast
+        self.recovery = recovery
+        self.pendingStore = recovery.pendingStore
         self.onPurchased = onPurchased
         self.onClose = onClose
     }
@@ -100,7 +105,6 @@ struct MembershipView: View {
         .overlay { ToastOverlay(center: toast) }
         .onReceive(auth.session) { member = $0 }
         .task { await loadPlans() }
-        .task { await replayUnfinishedPurchases() }
     }
 
     // ---- 套餐区 ----
@@ -194,15 +198,22 @@ struct MembershipView: View {
         purchasing = true
         defer { purchasing = false }
         do {
-            // ① 先单后买：服务端建支付单（同套餐有效单重复下单幂等命中）
+            // ① 先单后买：服务端建支付单（活跃单重复下单幂等命中）
             let order = try await client.createOrder(planId: plan.id)
-            guard let payNo = order.payNo, !payNo.isEmpty,
-                  let token = order.appAccountToken, !token.isEmpty,
+            guard let payNo = order.payNo, !payNo.isEmpty else {
+                throw ApiError(code: nil, "服务器错误，请稍后再试")
+            }
+            // S-C7：幂等命中 success 单（重复点击/重试）——直接按已购处理，不再购买
+            if order.status == "success" {
+                await refreshAndComplete()
+                return
+            }
+            guard let token = order.appAccountToken, !token.isEmpty,
                   let productId = order.productId, !productId.isEmpty,
                   let tokenUUID = UUID(uuidString: token) else {
                 throw ApiError(code: nil, "服务器错误，请稍后再试")
             }
-            // ② Create 后立即持久化（中断/被杀后启动重放的依据）
+            // ② Create 后立即持久化（Keychain 跨重装；中断/被杀后启动重放的依据）
             pendingStore.save(PendingPurchase(payNo: payNo, appAccountToken: token, productId: productId, createdAt: .now))
             // ③ StoreKit 购买：必须带 .appAccountToken（契约 §2.1-3，防一笔交易认领多单）
             guard let product = try await Product.products(for: [productId]).first else {
@@ -220,87 +231,91 @@ struct MembershipView: View {
                 case .unverified:
                     throw ApiError(code: nil, "交易凭证验证失败")
                 }
-                // ④ 服务端验证成功后才 finish（过早 finish 验证失败将无法补拿凭证）
-                let status = try await client.verify(payNo: payNo, transactionId: "\(transaction.id)")
-                if status == "success" {
-                    pendingStore.remove(payNo: payNo)
-                    await transaction.finish()
-                    _ = try await auth.refreshProfile() // 把最新 level/expireAt 拉进登录态快照
-                    onPurchased()
-                } else {
-                    // 服务端已确认但分发未完成：交易保持未完成，启动重放会补 finish
-                    toast.show("支付确认中，会员权益稍后自动生效")
-                }
+                try await verifyFinishAndRefresh(payNo: payNo, transaction: transaction)
             case .userCancelled:
                 toast.show("已取消支付")
             case .pending:
+                // 家长批准等异步交易由 app 级 updates 监听认领（S-C2），生效后自动刷新
                 toast.show("支付待确认（家长批准后自动生效）")
             @unknown default:
                 toast.show("支付未完成，请重试")
             }
         } catch {
-            toast.show(error.localizedDescription)
+            toast.show(Self.verifyErrorMessage(error))
         }
     }
 
-    /// 启动重放（契约 §2.1-5）：对每笔未 finish 的交易按 appAccountToken 找回单据重放
-    /// verify——断网/被杀/分发未完成场景唯一的补救路径。找不到单据的孤儿交易不动
-    /// （保持未完成，restore/人工核验处理）。
-    private func replayUnfinishedPurchases() async {
-        for await result in Transaction.unfinished {
-            let transaction: StoreKit.Transaction
-            switch result {
-            case .verified(let safe):
-                transaction = safe
-            case .unverified:
-                continue
-            }
-            guard let token = transaction.appAccountToken?.uuidString,
-                  let pending = pendingStore.pending(appAccountToken: token) else { continue }
-            do {
-                let status = try await client.verify(payNo: pending.payNo, transactionId: "\(transaction.id)")
-                if status == "success" {
-                    pendingStore.remove(payNo: pending.payNo)
-                    await transaction.finish()
-                    _ = try? await auth.refreshProfile()
-                }
-            } catch {
-                // 验证失败交易保持未完成，下次启动/重进页重放
-            }
+    /// verify → finish → refresh（S-C8 顺序修正）：finish 在前，但刷新失败**不走失败
+    /// 分支**——权益已生效，软提示后照常成功回调，避免诱导重复支付。
+    private func verifyFinishAndRefresh(payNo: String, transaction: StoreKit.Transaction) async throws {
+        // ④ 服务端验证成功后才 finish（过早 finish 验证失败将无法补拿凭证）
+        let status = try await client.verify(payNo: payNo, transactionId: "\(transaction.id)")
+        guard status == "success" else {
+            // 服务端已确认但分发未完成：交易保持未完成，app 级重放会补 finish
+            toast.show("支付确认中，会员权益稍后自动生效")
+            return
+        }
+        pendingStore.remove(payNo: payNo)
+        await transaction.finish()
+        await refreshAndComplete()
+    }
+
+    private func refreshAndComplete() async {
+        do {
+            _ = try await auth.refreshProfile() // 把最新 level/expireAt 拉进登录态快照
+        } catch {
+            toast.show("会员权益已生效，状态刷新失败，请重新进入页面查看")
+        }
+        onPurchased()
+    }
+
+    /// verify/restore 错误的客户端语义映射（契约 §2.2，审查 S-C5）：
+    /// 404 可重试、410 换单重下、400 查 token/环境、502 稍后重试；其余透传服务端文案。
+    static func verifyErrorMessage(_ error: Error) -> String {
+        guard let apiError = error as? ApiError, let code = apiError.code else {
+            return error.localizedDescription
+        }
+        switch code {
+        case 404: return "交易尚未查询到，请稍后重试"
+        case 410: return "支付单已过期，请重新下单"
+        case 400: return "交易与订单不一致，请确认购买账号与环境后重试"
+        case 502: return "支付渠道暂不可用，请稍后再试"
+        default: return apiError.message
         }
     }
 
-    /// 恢复购买（换机/重装）：按本地留存的 appAccountToken 逐个找回台账明细；
-    /// status=success 视为已履约刷新登录态，needsManualReview 引导联系客服。
+    /// 恢复购买（换机/重装，契约 §2.3，审查 S-C3）：① AppStore.sync() 把 Apple 侧
+    /// 购买记录拉回本地（重装后本地 pending 为空的唯一来源，交易经 updates/unfinished
+    /// 被恢复编排认领）② 服务端台账恢复（本地留存 token）③ 跑一轮重放认领。
     private func restorePurchases() async {
         guard !restoring else { return }
         restoring = true
         defer { restoring = false }
         do {
-            let tokens = pendingStore.list().map(\.appAccountToken)
-            guard !tokens.isEmpty else {
-                toast.show("没有待恢复的购买记录")
-                return
-            }
-            var fulfilled = false
-            var manual = false
-            for token in tokens {
+            try await AppStore.sync()
+        } catch {
+            // sync 失败不阻断：本地留有 token 时台账恢复仍然可达
+        }
+        var fulfilled = false
+        var manual = false
+        for token in pendingStore.list().map(\.appAccountToken) {
+            do {
                 let data = try await client.restore(appAccountToken: token)
                 if let transactions = data.transactions {
                     fulfilled = fulfilled || transactions.contains { $0.status == "success" }
                 }
                 if data.needsManualReview == true { manual = true }
+            } catch {
+                // 单个 token 失败不阻断其余 token
             }
-            if fulfilled {
-                _ = try await auth.refreshProfile()
-                onPurchased()
-            } else if manual {
-                toast.show("购买需要人工核验，请联系客服处理")
-            } else {
-                toast.show("未找到可恢复的购买记录")
-            }
-        } catch {
-            toast.show(error.localizedDescription)
+        }
+        let adopted = await recovery.replayOnce()
+        if fulfilled || adopted > 0 {
+            await refreshAndComplete()
+        } else if manual {
+            toast.show("购买需要人工核验，请联系客服处理")
+        } else {
+            toast.show("未找到可恢复的购买记录")
         }
     }
 }

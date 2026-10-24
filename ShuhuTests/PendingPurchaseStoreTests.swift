@@ -2,16 +2,15 @@ import XCTest
 @testable import Shuhu
 
 /// 未完成支付单持久化（先单后买契约 §2.1-2/5）：落盘、按 token 找单、验证成功移除。
+/// 生产实现是 Keychain（跨重装存活，审查 S-C1）；测试用内存注入。
 final class PendingPurchaseStoreTests: XCTestCase {
 
-    private static let suiteName = "test.pendingPurchases"
-    private var defaults: UserDefaults!
+    private var kv: InMemoryKVStore!
     private var store: PendingPurchaseStore!
 
     override func setUpWithError() throws {
-        defaults = UserDefaults(suiteName: Self.suiteName)
-        defaults.removePersistentDomain(forName: Self.suiteName)
-        store = PendingPurchaseStore(defaults: defaults)
+        kv = InMemoryKVStore()
+        store = PendingPurchaseStore(store: kv)
     }
 
     private func pending(_ payNo: String, token: String) -> PendingPurchase {
@@ -58,5 +57,14 @@ final class PendingPurchaseStoreTests: XCTestCase {
     func testEmptyListOnFreshInstall() {
         XCTAssertTrue(store.list().isEmpty)
         XCTAssertNil(store.pending(appAccountToken: "anything"))
+    }
+
+    /// Keychain 后端语义：数据存活于 store 实例之外（进程重启/重装后以同 service 读回）——
+    /// 内存后端以「新实例读同库」模拟该契约。
+    func testStoreSurvivesAcrossInstances() {
+        store.save(pending("PAY1", token: "A1B2C3D4-0000-0000-0000-000000000001"))
+
+        let reopened = PendingPurchaseStore(store: kv)
+        XCTAssertEqual(reopened.list().map(\.payNo), ["PAY1"])
     }
 }

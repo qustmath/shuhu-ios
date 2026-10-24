@@ -38,6 +38,7 @@ struct HomeView: View {
     private let sync: SyncController
     private let adsClient: AdsClient
     private let membershipClient: MembershipClient
+    private let iapRecovery: IAPRecovery
     private let feedbackClient: FeedbackClient
     private let wechat: any WechatAuthCodeClient
     private let toast: ToastCenter
@@ -88,6 +89,7 @@ struct HomeView: View {
         sync: SyncController,
         adsClient: AdsClient,
         membershipClient: MembershipClient,
+        iapRecovery: IAPRecovery,
         feedbackClient: FeedbackClient,
         wechat: any WechatAuthCodeClient,
         toast: ToastCenter,
@@ -97,6 +99,7 @@ struct HomeView: View {
         self.sync = sync
         self.adsClient = adsClient
         self.membershipClient = membershipClient
+        self.iapRecovery = iapRecovery
         self.feedbackClient = feedbackClient
         self.wechat = wechat
         self.toast = toast
@@ -235,6 +238,7 @@ struct HomeView: View {
             .sheet(isPresented: $showMembership) {
                 MembershipView(
                     client: membershipClient,
+                    recovery: iapRecovery,
                     auth: auth,
                     toast: toast,
                     onPurchased: {

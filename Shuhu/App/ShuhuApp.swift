@@ -14,6 +14,8 @@ final class AppContainer {
     let feedbackClient: FeedbackClient
     /// 微信授权码客户端（WechatAuthClient 单例；WXApi.registerApp 在其 init 完成）。
     let wechat: WechatAuthCodeClient
+    /// 苹果内购恢复编排（启动重放未完成交易 + Transaction.updates 常驻监听）。
+    let iapRecovery: IAPRecovery
     /// 全局轻提示（Android Toast 对应）。
     let toast = ToastCenter()
 
@@ -48,12 +50,14 @@ final class AppContainer {
         adsClient = AdsClient(api: AdsApi(client: authedClient))
         membershipClient = MembershipClient(client: authedClient)
         feedbackClient = FeedbackClient(client: authedClient)
+        iapRecovery = IAPRecovery(client: membershipClient, auth: auth)
     }
 
-    /// 启动时恢复登录态并启动同步引擎（视图 .task 调用；engine.start 幂等）。
+    /// 启动时恢复登录态、启动同步引擎与内购恢复编排（视图 .task 调用；均幂等）。
     func bootstrap() {
         auth.restore()
         sync.start()
+        iapRecovery.start()
     }
 }
 
@@ -81,6 +85,7 @@ struct ShuhuApp: App {
                         sync: container.sync,
                         adsClient: container.adsClient,
                         membershipClient: container.membershipClient,
+                        iapRecovery: container.iapRecovery,
                         feedbackClient: container.feedbackClient,
                         wechat: container.wechat,
                         toast: container.toast,
