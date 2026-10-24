@@ -79,4 +79,98 @@ final class MembershipClientTests: XCTestCase {
             XCTAssertEqual(error.message, "套餐不存在或已下架")
         }
     }
+
+    // ---- 真实支付（pay 模块，先单后买）----
+
+    func testCreateOrder_postsAppleChannelAndParsesToken() async throws {
+        MockURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/membership/purchase")
+            let body = try XCTUnwrap(request.bodyData)
+            let req = try JSONDecoder().decode(CreateOrderRequest.self, from: body)
+            XCTAssertEqual(req.channel, "apple_iap", "iOS 固定苹果内购渠道")
+            XCTAssertEqual(req.planId, 4)
+            return TestResponses.ok(MembershipOrderData(
+                payNo: "PAY1", channel: "apple_iap", status: "created", amount: 12800,
+                invoke: nil, appAccountToken: "A1B2C3D4-0000-0000-0000-000000000001",
+                productId: "shuhu.member.lifetime",
+            ))
+        }
+
+        let order = try await client.createOrder(planId: 4)
+
+        XCTAssertEqual(order.payNo, "PAY1")
+        XCTAssertEqual(order.appAccountToken, "A1B2C3D4-0000-0000-0000-000000000001")
+        XCTAssertEqual(order.productId, "shuhu.member.lifetime")
+        XCTAssertEqual(order.amount, 12800)
+    }
+
+    func testVerify_postsTransactionIdAndReturnsStatus() async throws {
+        MockURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/mods/pay/apple/verify")
+            let body = try XCTUnwrap(request.bodyData)
+            let req = try JSONDecoder().decode(AppleVerifyRequest.self, from: body)
+            XCTAssertEqual(req.payNo, "PAY1")
+            XCTAssertEqual(req.transactionId, "2000000012345678")
+            XCTAssertNil(req.jws, "推荐传交易号而非 JWS")
+            return TestResponses.ok(AppleVerifyData(payNo: "PAY1", status: "success"))
+        }
+
+        let status = try await client.verify(payNo: "PAY1", transactionId: "2000000012345678")
+
+        XCTAssertEqual(status, "success")
+    }
+
+    func testVerify_transactionNotFound_throwsServerMessage() async throws {
+        MockURLProtocol.handler = { _ in
+            TestResponses.businessError(code: 404, message: "交易不存在，请确认购买后重试")
+        }
+
+        do {
+            _ = try await client.verify(payNo: "PAY1", transactionId: "2000000012345678")
+            XCTFail("业务错误应抛出")
+        } catch let error as ApiError {
+            XCTAssertEqual(error.message, "交易不存在，请确认购买后重试")
+        }
+    }
+
+    func testRestore_parsesTransactionsAndManualReview() async throws {
+        MockURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/mods/pay/apple/restore")
+            let body = try XCTUnwrap(request.bodyData)
+            let req = try JSONDecoder().decode(AppleRestoreRequest.self, from: body)
+            XCTAssertEqual(req.appAccountToken, "A1B2C3D4-0000-0000-0000-000000000001")
+            XCTAssertNil(req.originalTransactionId)
+            return TestResponses.ok(AppleRestoreData(
+                transactions: [
+                    RestoreTransactionData(
+                        payNo: "PAY1", status: "success", productId: "shuhu.member.lifetime",
+                        amount: 12800, currency: "CNY", transactionId: "2000000012345678", paidAt: "2026-10-24T12:00:00Z",
+                    ),
+                    RestoreTransactionData(
+                        payNo: "PAY2", status: "refunded", productId: "shuhu.member.yearly",
+                        amount: 6800, currency: "CNY", transactionId: "2000000012345679", paidAt: nil,
+                    ),
+                ],
+                needsManualReview: nil,
+            ))
+        }
+
+        let data = try await client.restore(appAccountToken: "A1B2C3D4-0000-0000-0000-000000000001")
+
+        XCTAssertEqual(data.transactions?.count, 2)
+        XCTAssertEqual(data.transactions?.first?.status, "success")
+        XCTAssertEqual(data.transactions?.last?.status, "refunded", "refunded 单不得重新发放")
+        XCTAssertNil(data.needsManualReview)
+    }
+
+    func testRestore_needsManualReviewWhenUnmatched() async throws {
+        MockURLProtocol.handler = { _ in
+            TestResponses.ok(AppleRestoreData(transactions: nil, needsManualReview: true))
+        }
+
+        let data = try await client.restore(appAccountToken: "A1B2C3D4-0000-0000-0000-000000000001")
+
+        XCTAssertEqual(data.needsManualReview, true, "归属不匹配时服务端只回人工核验标记")
+        XCTAssertNil(data.transactions, "不泄露任何交易字段")
+    }
 }
