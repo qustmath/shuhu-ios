@@ -156,7 +156,7 @@ final class IAPRecovery {
     func start() {
         guard !started else { return }
         started = true
-        Task { await replayUnfinished() }
+        Task { _ = await replayOnce() }
         Task { await listenUpdates() }
     }
 
