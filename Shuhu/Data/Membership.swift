@@ -121,7 +121,7 @@ public struct MembershipClient: Sendable {
 
 // ---- 真实支付 DTO ----
 
-public struct CreateOrderRequest: Encodable, Sendable {
+public struct CreateOrderRequest: Codable, Sendable {
     public let planId: Int64
     public let channel: String
 
@@ -145,7 +145,7 @@ public struct MembershipOrderData: Codable, Sendable {
     public let productId: String?
 }
 
-public struct AppleVerifyRequest: Encodable, Sendable {
+public struct AppleVerifyRequest: Codable, Sendable {
     public let payNo: String
     public let transactionId: String
     public let jws: String?
@@ -162,7 +162,7 @@ public struct AppleVerifyData: Codable, Sendable {
     public let status: String?
 }
 
-public struct AppleRestoreRequest: Encodable, Sendable {
+public struct AppleRestoreRequest: Codable, Sendable {
     public let appAccountToken: String?
     public let originalTransactionId: String?
 
