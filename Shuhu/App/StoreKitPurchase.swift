@@ -2,7 +2,9 @@ import Foundation
 import StoreKit
 
 // 苹果内购（IAP）支撑：先单后买契约（docs/pay/client-integration.md §2）的本地侧。
-// 链路编排在 MembershipView，本文件只承载未完成单持久化与 StoreKit 验签解包。
+// 链路编排在 MembershipView，本文件只承载未完成单持久化。
+// 注：StoreKit 验签解包用内联 switch（.verified/.unverified 模式匹配）——不点名
+// Verification 类型，避免其在不同 SDK 版本中的作用域差异（Xcode 26 编译实测）。
 
 /// 未完成支付单的本地持久化：Create 后立即落盘 payNo + appAccountToken + productId，
 /// 购买中断/断网/被杀后启动重放 verify 用（契约 §2.1-2/5）。
@@ -48,18 +50,6 @@ struct PendingPurchaseStore: Sendable {
         all.removeAll { $0.payNo == payNo }
         if let data = try? JSONEncoder().encode(all) {
             defaults.set(data, forKey: Self.key)
-        }
-    }
-}
-
-/// StoreKit 2 验签解包：未通过验证的交易一律视为无效（官方 recommended 模式）。
-enum StoreKitVerifier {
-    static func verified<T>(_ verification: Verification<T>) throws -> T {
-        switch verification {
-        case .verified(let safe):
-            return safe
-        case .unverified:
-            throw ApiError(code: nil, "交易凭证验证失败")
         }
     }
 }

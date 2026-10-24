@@ -211,7 +211,14 @@ struct MembershipView: View {
             let result = try await product.purchase(options: [.appAccountToken(tokenUUID)])
             switch result {
             case .success(let verification):
-                let transaction = try StoreKitVerifier.verified(verification)
+                // 验签解包：未通过验证的交易一律视为无效（内联 switch，不点名 Verification 类型）
+                let transaction: Transaction
+                switch verification {
+                case .verified(let safe):
+                    transaction = safe
+                case .unverified:
+                    throw ApiError(code: nil, "交易凭证验证失败")
+                }
                 // ④ 服务端验证成功后才 finish（过早 finish 验证失败将无法补拿凭证）
                 let status = try await client.verify(payNo: payNo, transactionId: "\(transaction.id)")
                 if status == "success" {
@@ -240,7 +247,13 @@ struct MembershipView: View {
     /// （保持未完成，restore/人工核验处理）。
     private func replayUnfinishedPurchases() async {
         for await result in Transaction.unfinished {
-            guard let transaction = try? StoreKitVerifier.verified(result) else { continue }
+            let transaction: Transaction
+            switch result {
+            case .verified(let safe):
+                transaction = safe
+            case .unverified:
+                continue
+            }
             guard let token = transaction.appAccountToken?.uuidString,
                   let pending = pendingStore.pending(appAccountToken: token) else { continue }
             do {
