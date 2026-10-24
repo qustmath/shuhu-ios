@@ -51,7 +51,8 @@ struct KeychainStore: SecureKVStore {
         var attributes = query
         attributes[kSecValueData as String] = data
         attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(attributes as CFDictionary, nil)
+        let addStatus = SecItemAdd(attributes as CFDictionary, nil)
+        assert(addStatus == errSecSuccess, "Keychain add 失败: \(addStatus)")
     }
 
     func removeValue(forKey key: String) {
@@ -224,6 +225,7 @@ final class IAPRecovery {
         guard let pending else { return false }
         switch await verifyAndSettle(payNo: pending.payNo, transaction: transaction) {
         case .fulfilled:
+            _ = try? await auth.refreshProfile() // 后台路径尽力刷新快照（N3：刷新归调用方）
             return true
         default:
             return false
@@ -271,14 +273,15 @@ final class IAPRecovery {
     }
 
     /// verify → finish → 清留存（交互式购买与后台重放共用的唯一实现，审查 R4——
-    /// 410 清留存收敛在此，两条路径行为一致）。
+    /// 410 清留存收敛在此，两条路径行为一致）。不负责刷新资料（N3）：交互式路径走
+    /// refreshAndComplete（失败可软提示），后台路径自行 try? 刷新——共享函数内刷新
+    /// 会让交互式路径连刷两次，第二次失败在支付已成功时误提示。
     func verifyAndSettle(payNo: String, transaction: any IAPTransactionHandle) async -> VerifyOutcome {
         do {
             let status = try await client.verify(payNo: payNo, transactionId: transaction.transactionID)
             guard status == "success" else { return .dispatchPending }
             pendingStore.remove(payNo: payNo)
             await transaction.markFinished()
-            _ = try? await auth.refreshProfile()
             return .fulfilled
         } catch let apiError as ApiError where apiError.code == 410 {
             // 410 订单过期且交易不匹配：换单重下——清掉本地留存（S-C5，否则重放永久撞 410）

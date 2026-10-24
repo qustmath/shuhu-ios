@@ -299,6 +299,7 @@ struct MembershipView: View {
         }
         var fulfilled = false
         var manual = false
+        var networkFailure = false
         for token in pendingStore.list().map(\.appAccountToken) {
             do {
                 let data = try await client.restore(appAccountToken: token)
@@ -307,7 +308,9 @@ struct MembershipView: View {
                 }
                 if data.needsManualReview == true { manual = true }
             } catch {
-                // 单个 token 失败不阻断其余 token
+                // 单个 token 失败不阻断其余 token；网络类失败区分提示（N6——
+                // 网络异常不得显示「未找到可恢复的购买记录」）
+                if (error as? ApiError)?.code == nil { networkFailure = true }
             }
         }
         let adopted = await recovery.replayOnce()
@@ -315,6 +318,8 @@ struct MembershipView: View {
             await refreshAndComplete()
         } else if manual {
             toast.show("购买需要人工核验，请联系客服处理")
+        } else if networkFailure {
+            toast.show("网络异常，恢复失败，请稍后重试")
         } else {
             toast.show("未找到可恢复的购买记录")
         }

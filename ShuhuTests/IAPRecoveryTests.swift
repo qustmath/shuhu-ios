@@ -94,7 +94,7 @@ final class IAPRecoveryTests: XCTestCase {
         guard case .fulfilled = outcome else { return XCTFail("期望 fulfilled，实得 \(outcome)") }
         XCTAssertTrue(transaction.finished, "成功后必须 finish（契约 §2.1-4 之外不允许早 finish）")
         XCTAssertNil(store.pending(appAccountToken: token.uuidString), "已履约单清留存")
-        XCTAssertEqual(auth.refreshCount, 1)
+        XCTAssertEqual(auth.refreshCount, 0, "N3：刷新归调用方，共享函数不刷")
     }
 
     // 服务端已确认但分发未完成 → .dispatchPending：不 finish、不清留存
