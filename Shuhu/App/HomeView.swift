@@ -239,8 +239,8 @@ struct HomeView: View {
                 MembershipView(
                     client: membershipClient,
                     auth: auth,
-                    recovery: iapRecovery,
                     toast: toast,
+                    recovery: iapRecovery,
                     onPurchased: {
                         showMembership = false
                         toast.show("支付成功，会员已开通")
