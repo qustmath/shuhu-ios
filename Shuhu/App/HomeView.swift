@@ -238,12 +238,12 @@ struct HomeView: View {
             .sheet(isPresented: $showMembership) {
                 MembershipView(
                     client: membershipClient,
-                    recovery: iapRecovery,
                     auth: auth,
+                    recovery: iapRecovery,
                     toast: toast,
                     onPurchased: {
                         showMembership = false
-                        toast.show("支付成功，会员已开通（模拟支付）")
+                        toast.show("支付成功，会员已开通")
                         // 购买成功跳设置页（从设置页进入的已在设置页，不重复压栈）
                         if navPath.last != .settings {
                             navPath.append(.settings)
