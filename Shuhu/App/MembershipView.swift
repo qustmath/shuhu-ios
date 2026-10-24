@@ -261,13 +261,24 @@ struct MembershipView: View {
         }
     }
 
-    private func refreshAndComplete() async {
-        do {
-            _ = try await auth.refreshProfile() // 把最新 level/expireAt 拉进登录态快照
-        } catch {
-            toast.show("会员权益已生效，状态刷新失败，请重新进入页面查看")
+    /// 刷新登录态并成功回调。skipRefresh（N7）：调用方刚自行刷新过（如恢复路径
+    /// settle 已刷）时置 true，避免连刷两次、第二次失败在已成功时误提示。
+    private func refreshAndComplete(skipRefresh: Bool = false) async {
+        if !skipRefresh {
+            do {
+                _ = try await auth.refreshProfile() // 把最新 level/expireAt 拉进登录态快照
+            } catch {
+                toast.show("会员权益已生效，状态刷新失败，请重新进入页面查看")
+            }
         }
         onPurchased()
+    }
+
+    /// 恢复失败是否可重试（N9）：网络（code=nil）/5xx/429/401——都不该显示
+    /// 「未找到可恢复的购买记录」这种终态文案
+    static func isRetryableRestoreError(_ error: Error) -> Bool {
+        guard let apiError = error as? ApiError, let code = apiError.code else { return true }
+        return code >= 500 || code == 429 || code == 401
     }
 
     /// verify/restore 错误的客户端语义映射（契约 §2.2，审查 S-C5）：
@@ -299,7 +310,7 @@ struct MembershipView: View {
         }
         var fulfilled = false
         var manual = false
-        var networkFailure = false
+        var retryableFailure = false
         for token in pendingStore.list().map(\.appAccountToken) {
             do {
                 let data = try await client.restore(appAccountToken: token)
@@ -308,18 +319,18 @@ struct MembershipView: View {
                 }
                 if data.needsManualReview == true { manual = true }
             } catch {
-                // 单个 token 失败不阻断其余 token；网络类失败区分提示（N6——
-                // 网络异常不得显示「未找到可恢复的购买记录」）
-                if (error as? ApiError)?.code == nil { networkFailure = true }
+                // 单个 token 失败不阻断其余 token；可重试类失败区分提示（N9——
+                // 网络/5xx/429/401 不得显示「未找到可恢复的购买记录」）
+                if Self.isRetryableRestoreError(error) { retryableFailure = true }
             }
         }
         let adopted = await recovery.replayOnce()
         if fulfilled || adopted > 0 {
-            await refreshAndComplete()
+            await refreshAndComplete(skipRefresh: adopted > 0) // N7：settle 已刷，跳过防双刷
         } else if manual {
             toast.show("购买需要人工核验，请联系客服处理")
-        } else if networkFailure {
-            toast.show("网络异常，恢复失败，请稍后重试")
+        } else if retryableFailure {
+            toast.show("网络异常或登录已过期，恢复失败，请稍后重试")
         } else {
             toast.show("未找到可恢复的购买记录")
         }

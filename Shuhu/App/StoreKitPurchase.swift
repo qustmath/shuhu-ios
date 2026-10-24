@@ -1,6 +1,7 @@
 import Foundation
-import StoreKit
+import os
 import Security
+import StoreKit
 
 // 苹果内购（IAP）支撑：先单后买契约（docs/pay/client-integration.md §2）的本地侧。
 // 链路编排在 MembershipView（购买）与 IAPRecovery（启动重放/updates 监听/恢复）。
@@ -11,15 +12,18 @@ import Security
 // ---------------------------------------------------------------------------
 
 /// Keychain 通用存取接缝（测试注入内存实现）。
+/// set 返回是否成功（N8：失败经 os.Logger 留痕——assert 在 release 被编译掉，
+/// 静默丢 pending 连排查线索都没有）。
 protocol SecureKVStore: Sendable {
     func data(forKey key: String) -> Data?
-    func set(_ data: Data, forKey key: String)
+    func set(_ data: Data, forKey key: String) -> Bool
     func removeValue(forKey key: String)
 }
 
 /// Keychain Generic Password 存取（TokenStore 同款实现，独立 service 隔离支付数据）。
 struct KeychainStore: SecureKVStore {
     private let service: String
+    private let logger = Logger(subsystem: "ink.groovy.shuhu", category: "pay.keychain")
 
     init(service: String = "ink.groovy.shuhu.pay") {
         self.service = service
@@ -38,7 +42,8 @@ struct KeychainStore: SecureKVStore {
         return result as? Data
     }
 
-    func set(_ data: Data, forKey key: String) {
+    @discardableResult
+    func set(_ data: Data, forKey key: String) -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -47,12 +52,20 @@ struct KeychainStore: SecureKVStore {
         // 先 update 后 add（R7）：先删后加在 add 失败时会丢旧值
         let update: [String: Any] = [kSecValueData as String: data]
         let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
-        guard status == errSecItemNotFound else { return }
+        guard status == errSecItemNotFound else {
+            if status == errSecSuccess { return true }
+            logger.error("Keychain update 失败(\(key, privacy: .public)): \(status)")
+            return false
+        }
         var attributes = query
         attributes[kSecValueData as String] = data
         attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         let addStatus = SecItemAdd(attributes as CFDictionary, nil)
-        assert(addStatus == errSecSuccess, "Keychain add 失败: \(addStatus)")
+        guard addStatus == errSecSuccess else {
+            logger.error("Keychain add 失败(\(key, privacy: .public)): \(addStatus)")
+            return false
+        }
+        return true
     }
 
     func removeValue(forKey key: String) {
@@ -76,10 +89,12 @@ final class InMemoryKVStore: SecureKVStore, @unchecked Sendable {
         return storage[key]
     }
 
-    func set(_ data: Data, forKey key: String) {
+    @discardableResult
+    func set(_ data: Data, forKey key: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         storage[key] = data
+        return true
     }
 
     func removeValue(forKey key: String) {
