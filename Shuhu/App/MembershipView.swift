@@ -214,7 +214,10 @@ struct MembershipView: View {
                 throw ApiError(code: nil, "服务器错误，请稍后再试")
             }
             // ② Create 后立即持久化（Keychain 跨重装；中断/被杀后启动重放的依据）
-            pendingStore.save(PendingPurchase(payNo: payNo, appAccountToken: token, productId: productId, createdAt: .now))
+            // N11：落盘失败软提示——pending 丢了自动恢复即失效，提醒用户勿中途退出
+            if !pendingStore.save(PendingPurchase(payNo: payNo, appAccountToken: token, productId: productId, createdAt: .now)) {
+                toast.show("支付记录保存失败，若支付中断可能无法自动恢复")
+            }
             // ③ StoreKit 购买：必须带 .appAccountToken（契约 §2.1-3，防一笔交易认领多单）
             guard let product = try await Product.products(for: [productId]).first else {
                 throw ApiError(code: nil, "内购商品暂不可用，请稍后再试")
@@ -261,24 +264,15 @@ struct MembershipView: View {
         }
     }
 
-    /// 刷新登录态并成功回调。skipRefresh（N7）：调用方刚自行刷新过（如恢复路径
-    /// settle 已刷）时置 true，避免连刷两次、第二次失败在已成功时误提示。
-    private func refreshAndComplete(skipRefresh: Bool = false) async {
-        if !skipRefresh {
-            do {
-                _ = try await auth.refreshProfile() // 把最新 level/expireAt 拉进登录态快照
-            } catch {
-                toast.show("会员权益已生效，状态刷新失败，请重新进入页面查看")
-            }
+    /// 刷新登录态并成功回调（N12：settle 不再刷新，本函数是恢复/购买路径唯一的
+    /// 刷新点——失败软提示不阻断成功回调）。
+    private func refreshAndComplete() async {
+        do {
+            _ = try await auth.refreshProfile() // 把最新 level/expireAt 拉进登录态快照
+        } catch {
+            toast.show("会员权益已生效，状态刷新失败，请重新进入页面查看")
         }
         onPurchased()
-    }
-
-    /// 恢复失败是否可重试（N9）：网络（code=nil）/5xx/429/401——都不该显示
-    /// 「未找到可恢复的购买记录」这种终态文案
-    static func isRetryableRestoreError(_ error: Error) -> Bool {
-        guard let apiError = error as? ApiError, let code = apiError.code else { return true }
-        return code >= 500 || code == 429 || code == 401
     }
 
     /// verify/restore 错误的客户端语义映射（契约 §2.2，审查 S-C5）：
@@ -303,14 +297,16 @@ struct MembershipView: View {
         guard !restoring else { return }
         restoring = true
         defer { restoring = false }
-        do {
-            try await AppStore.sync()
-        } catch {
-            // sync 失败不阻断：本地留有 token 时台账恢复仍然可达
-        }
         var fulfilled = false
         var manual = false
         var retryableFailure = false
+        do {
+            try await AppStore.sync()
+        } catch {
+            // sync 失败不阻断本地 token 的台账恢复，但标记可重试（N14——
+            // Apple 侧没拉回来时「未找到」是误导）
+            retryableFailure = true
+        }
         for token in pendingStore.list().map(\.appAccountToken) {
             do {
                 let data = try await client.restore(appAccountToken: token)
@@ -321,12 +317,13 @@ struct MembershipView: View {
             } catch {
                 // 单个 token 失败不阻断其余 token；可重试类失败区分提示（N9——
                 // 网络/5xx/429/401 不得显示「未找到可恢复的购买记录」）
-                if Self.isRetryableRestoreError(error) { retryableFailure = true }
+                if IAPRecovery.isRetryableRestoreError(error) { retryableFailure = true }
             }
         }
-        let adopted = await recovery.replayOnce()
+        let (adopted, replayRetryable) = await recovery.replayOnce()
+        retryableFailure = retryableFailure || replayRetryable
         if fulfilled || adopted > 0 {
-            await refreshAndComplete(skipRefresh: adopted > 0) // N7：settle 已刷，跳过防双刷
+            await refreshAndComplete()
         } else if manual {
             toast.show("购买需要人工核验，请联系客服处理")
         } else if retryableFailure {

@@ -119,13 +119,14 @@ struct PendingPurchaseStore: Sendable {
         self.store = store
     }
 
-    func save(_ pending: PendingPurchase) {
+    /// 返回是否落盘成功（N11：失败时调用方提示——pending 丢了恢复路径即失效）。
+    @discardableResult
+    func save(_ pending: PendingPurchase) -> Bool {
         var all = list()
         all.removeAll { $0.payNo == pending.payNo }
         all.append(pending)
-        if let data = try? JSONEncoder().encode(all) {
-            store.set(data, forKey: Self.key)
-        }
+        guard let data = try? JSONEncoder().encode(all) else { return false }
+        return store.set(data, forKey: Self.key)
     }
 
     func list() -> [PendingPurchase] {
@@ -188,17 +189,23 @@ final class IAPRecovery {
         self.pendingStore = store
     }
 
-    /// 幂等启动：先重放存量未完成交易，再常驻监听 updates。
+    /// 幂等启动：先重放存量未完成交易，再常驻监听 updates（后台路径自行静默刷新）。
     func start() {
         guard !started else { return }
         started = true
-        Task { _ = await replayOnce() }
+        Task {
+            let (fulfilled, _) = await replayOnce()
+            if fulfilled > 0 { await refreshQuietly() }
+        }
         Task { await listenUpdates() }
     }
 
-    /// 单轮重放（恢复购买页/测试入口调用），返回本轮 verify 成功的单数。
-    func replayOnce() async -> Int {
+    /// 单轮重放（恢复购买页/测试入口调用）：返回履约确认单数与可重试失败标记
+    ///（N14——失败也回传，让调用方区分「没有记录」与「这次没查成」）。
+    /// 不负责刷新资料（N12：刷新归调用方，恢复路径单刷一次）。
+    func replayOnce() async -> (fulfilled: Int, retryableFailure: Bool) {
         var fulfilled = 0
+        var retryableFailure = false
         for await result in Transaction.unfinished {
             let transaction: StoreKit.Transaction
             switch result {
@@ -207,11 +214,20 @@ final class IAPRecovery {
             case .unverified:
                 continue
             }
-            if await settle(transaction: transaction) {
+            switch await settle(transaction: transaction) {
+            case .fulfilled:
                 fulfilled += 1
+            case .failed(let error) where Self.isRetryableRestoreError(error):
+                retryableFailure = true
+            default:
+                break
             }
         }
-        return fulfilled
+        return (fulfilled, retryableFailure)
+    }
+
+    private func refreshQuietly() async {
+        _ = try? await auth.refreshProfile()
     }
 
     private func listenUpdates() async {
@@ -223,28 +239,24 @@ final class IAPRecovery {
             case .unverified:
                 continue
             }
-            await settle(transaction: transaction)
+            if case .fulfilled = await settle(transaction: transaction) {
+                await refreshQuietly()
+            }
         }
     }
 
-    /// 认领一笔未完成交易：找单（本地留存 → 孤儿领养）→ verify → finish → 刷快照。
-    /// 返回是否完成履约确认。
-    private func settle(transaction: any IAPTransactionHandle) async -> Bool {
-        guard let token = transaction.accountToken?.uuidString else { return false }
+    /// 认领一笔未完成交易：找单（本地留存 → 孤儿领养）→ verify → finish。
+    /// 返回 nil = 未找到归属单据；否则回传结算结果（刷新由调用方负责，N12）。
+    private func settle(transaction: any IAPTransactionHandle) async -> VerifyOutcome? {
+        guard let token = transaction.accountToken?.uuidString else { return nil }
         var pending = pendingStore.pending(appAccountToken: token)
         if pending == nil {
             // 孤儿交易：本地对不上（重装/清数据）——按交易自带 token 走服务端台账找回
             //（S-C4：不能保持未完成干等人工核验，用户侧无任何恢复动作）
             pending = await adoptOrphan(transaction: transaction, token: token)
         }
-        guard let pending else { return false }
-        switch await verifyAndSettle(payNo: pending.payNo, transaction: transaction) {
-        case .fulfilled:
-            _ = try? await auth.refreshProfile() // 后台路径尽力刷新快照（N3：刷新归调用方）
-            return true
-        default:
-            return false
-        }
+        guard let pending else { return nil }
+        return await verifyAndSettle(payNo: pending.payNo, transaction: transaction)
     }
 
     /// restore 找回台账：只认 status=success 且 transactionId 一致的记录（refunded 不得补发）；
@@ -263,6 +275,13 @@ final class IAPRecovery {
         )
         pendingStore.save(pending)
         return pending
+    }
+
+    /// 恢复失败是否可重试（N9/N14）：网络（code=nil）/5xx/429/401——都不该显示
+    /// 「未找到可恢复的购买记录」这种终态文案
+    static func isRetryableRestoreError(_ error: Error) -> Bool {
+        guard let apiError = error as? ApiError, let code = apiError.code else { return true }
+        return code >= 500 || code == 429 || code == 401
     }
 
     /// 领养筛选（纯函数，R6 测试点）：success 且 transactionId 一致精确认领；无精确
