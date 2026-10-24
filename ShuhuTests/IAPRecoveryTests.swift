@@ -129,20 +129,22 @@ final class IAPRecoveryTests: XCTestCase {
         XCTAssertFalse(transaction.finished)
     }
 
-    // 领养筛选（纯函数）：只认 success 且 transactionId 一致
+    // 领养筛选（纯函数）：success+txid 精确优先；回退认领 created/paying（R5，票 17 后安全）
     func testAdoptableRecord_filters() {
         let records = [
             RestoreTransactionData(payNo: "PAY1", status: "success", productId: nil, amount: nil, currency: nil, transactionId: "2000000012345678", paidAt: nil),
             RestoreTransactionData(payNo: "PAY2", status: "refunded", productId: nil, amount: nil, currency: nil, transactionId: "2000000012345679", paidAt: nil),
-            RestoreTransactionData(payNo: "PAY3", status: "success", productId: nil, amount: nil, currency: nil, transactionId: nil, paidAt: nil),
+            RestoreTransactionData(payNo: "PAY4", status: "paying", productId: nil, amount: nil, currency: nil, transactionId: nil, paidAt: nil),
         ]
 
         let adopted = IAPRecovery.adoptableRecord(in: records, transactionId: "2000000012345678")
-        XCTAssertEqual(adopted?.payNo, "PAY1")
+        XCTAssertEqual(adopted?.payNo, "PAY1", "精确匹配优先")
 
-        // refunded 不得补发
-        XCTAssertNil(IAPRecovery.adoptableRecord(in: records, transactionId: "2000000012345679"))
-        // transactionId 不一致（含台账缺失 txid 的 created 单——放宽待主线票 17）
-        XCTAssertNil(IAPRecovery.adoptableRecord(in: records, transactionId: "2000000012345670"))
+        // 无精确匹配 → 回退认领 created/paying 单（verify 交服务端全量校验）
+        XCTAssertEqual(IAPRecovery.adoptableRecord(in: records, transactionId: "2000000012345670")?.payNo, "PAY4")
+
+        // refunded/closed/failed 不领养
+        let terminal = [records[1]]
+        XCTAssertNil(IAPRecovery.adoptableRecord(in: terminal, transactionId: "2000000012345679"))
     }
 }

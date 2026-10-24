@@ -248,13 +248,19 @@ final class IAPRecovery {
         return pending
     }
 
-    /// 领养筛选（纯函数，R6 测试点）：只认 success 且 transactionId 一致。放宽到
-    /// created/paying 依赖主线票 17（success 分支交易身份校验）修复，放宽前从严。
+    /// 领养筛选（纯函数，R6 测试点）：success 且 transactionId 一致精确认领；无精确
+    /// 匹配时回退认领 created/paying 单（修复复核 R5——重装/清数据场景该单尚未
+    /// verify 过、台账无交易号）。安全性：服务端 verify 全量校验（token/产品/金额），
+    /// 同单第二笔支付由主线票 17+整改兜底（channel_mismatch，客户端不 finish），
+    /// refunded/closed/failed 不领养。
     static func adoptableRecord(
         in records: [RestoreTransactionData],
         transactionId: String,
     ) -> RestoreTransactionData? {
-        records.first { $0.status == "success" && $0.transactionId == transactionId }
+        if let exact = records.first(where: { $0.status == "success" && $0.transactionId == transactionId }) {
+            return exact
+        }
+        return records.first { $0.status == "created" || $0.status == "paying" }
     }
 
     enum VerifyOutcome {
