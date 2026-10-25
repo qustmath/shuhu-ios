@@ -182,6 +182,7 @@ final class IAPRecovery {
     /// 未完成单存储（购买页与恢复编排共用同一实例）。
     let pendingStore: PendingPurchaseStore
     private var started = false
+    private let logger = Logger(subsystem: "ink.groovy.shuhu", category: "pay.recovery")
 
     init(client: MembershipClient, auth: any AuthRepository, store: PendingPurchaseStore = PendingPurchaseStore()) {
         self.client = client
@@ -253,7 +254,13 @@ final class IAPRecovery {
         if pending == nil {
             // 孤儿交易：本地对不上（重装/清数据）——按交易自带 token 走服务端台账找回
             //（S-C4：不能保持未完成干等人工核验，用户侧无任何恢复动作）
-            pending = await adoptOrphan(transaction: transaction, token: token)
+            do {
+                pending = try await adoptOrphan(transaction: transaction, token: token)
+            } catch {
+                // restore 失败（网络/5xx/429/401）：与 verify 失败同构回传，replayOnce
+                // 据此标可重试（N15——静默 nil 会让恢复页把网络失败误报成「未找到」）
+                return .failed(error)
+            }
         }
         guard let pending else { return nil }
         return await verifyAndSettle(payNo: pending.payNo, transaction: transaction)
@@ -261,9 +268,11 @@ final class IAPRecovery {
 
     /// restore 找回台账：只认 status=success 且 transactionId 一致的记录（refunded 不得补发）；
     /// needs_manual_review 是隐私边界（零交易字段），保持未完成等人工核验。
-    private func adoptOrphan(transaction: any IAPTransactionHandle, token: String) async -> PendingPurchase? {
-        guard let data = try? await client.restore(appAccountToken: token),
-              let records = data.transactions,
+    /// restore 网络调用失败时抛出（N15，settle 包装成 .failed）；服务端可达但无单据返回 nil。
+    /// internal 供测试注入内存交易驱动领养判定。
+    func adoptOrphan(transaction: any IAPTransactionHandle, token: String) async throws -> PendingPurchase? {
+        let data = try await client.restore(appAccountToken: token)
+        guard let records = data.transactions,
               let match = Self.adoptableRecord(in: records, transactionId: transaction.transactionID),
               let payNo = match.payNo, !payNo.isEmpty
         else { return nil }
@@ -273,8 +282,18 @@ final class IAPRecovery {
             productId: match.productId ?? transaction.storeProductID,
             createdAt: .now,
         )
-        pendingStore.save(pending)
+        if !pendingStore.save(pending) {
+            // N17：落盘失败留痕——verify 失败且进程被杀时下次启动会重新走孤儿领养，
+            // 属可接受降级，但重放/排查需要线索
+            logger.error("孤儿领养 pending 落盘失败(\(payNo, privacy: .public))")
+        }
         return pending
+    }
+
+    /// restore/sync 的用户取消（登录/验证弹窗点取消）不是故障（N16）：与网络/服务错误
+    /// 区分开，取消给「已取消恢复」而非「网络异常或登录已过期」。
+    static func isUserCancellation(_ error: Error) -> Bool {
+        (error as? SKError)?.code == .paymentCancelled
     }
 
     /// 恢复失败是否可重试（N9/N14）：网络（code=nil）/5xx/429/401——都不该显示

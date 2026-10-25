@@ -55,6 +55,7 @@ final class IAPRecoveryTests: XCTestCase {
     private var kv: InMemoryKVStore!
     private var store: PendingPurchaseStore!
     private var auth: FakeAuthRepository!
+    private var client: MembershipClient!
     private var recovery: IAPRecovery!
 
     override func setUpWithError() throws {
@@ -65,8 +66,9 @@ final class IAPRecoveryTests: XCTestCase {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockURLProtocol.self]
         let apiClient = ApiClient(baseURL: URL(string: "https://test.local")!, session: URLSession(configuration: config))
+        client = MembershipClient(client: apiClient)
         recovery = IAPRecovery(
-            client: MembershipClient(client: apiClient),
+            client: client,
             auth: auth,
             store: store,
         )
@@ -75,6 +77,13 @@ final class IAPRecoveryTests: XCTestCase {
 
     override func tearDown() {
         MockURLProtocol.reset()
+    }
+
+    /// Keychain 写失败桩（N17：孤儿领养落盘失败时的降级语义）。
+    private class FailingKVStore: SecureKVStore {
+        func data(forKey key: String) -> Data? { nil }
+        @discardableResult func set(_ data: Data, forKey key: String) -> Bool { false }
+        func removeValue(forKey key: String) {}
     }
 
     private let token = UUID(uuidString: "A1B2C3D4-0000-0000-0000-000000000001")!
@@ -146,5 +155,58 @@ final class IAPRecoveryTests: XCTestCase {
         // refunded/closed/failed 不领养
         let terminal = [records[1]]
         XCTAssertNil(IAPRecovery.adoptableRecord(in: terminal, transactionId: "2000000012345679"))
+    }
+
+    // N15：孤儿领养的 restore 网络失败必须抛出（settle 包装 .failed → replayOnce 标可重试），
+    // 静默 nil 会让恢复页把网络失败误报成「未找到可恢复的购买记录」
+    func testAdoptOrphan_restoreNetworkFailureThrows() async throws {
+        MockURLProtocol.handler = { _ in throw URLError(.notConnectedToInternet) }
+        let transaction = FakeTransaction(id: "2000000012345678", token: token)
+
+        do {
+            _ = try await recovery.adoptOrphan(transaction: transaction, token: token.uuidString)
+            XCTFail("restore 网络失败应抛出而非静默返回 nil")
+        } catch {
+            XCTAssertTrue(IAPRecovery.isRetryableRestoreError(error), "网络错误必须判为可重试")
+        }
+    }
+
+    // 服务端可达但无单据 → nil 而非抛错：保持未完成等人工核验不是「失败」
+    func testAdoptOrphan_noRecordsReturnsNil() async throws {
+        MockURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/mods/pay/apple/restore")
+            return TestResponses.ok(AppleRestoreData(transactions: [], needsManualReview: false))
+        }
+        let transaction = FakeTransaction(id: "2000000012345678", token: token)
+
+        let adopted = try await recovery.adoptOrphan(transaction: transaction, token: token.uuidString)
+
+        XCTAssertNil(adopted)
+    }
+
+    // N16：sync/restore 的用户取消（登录/验证弹窗点取消）不是网络/服务故障
+    func testUserCancellationIsNotServiceFailure() {
+        XCTAssertTrue(IAPRecovery.isUserCancellation(SKError(.paymentCancelled)))
+        XCTAssertFalse(IAPRecovery.isUserCancellation(URLError(.timedOut)))
+        XCTAssertFalse(IAPRecovery.isUserCancellation(ApiError(code: 500, "服务器错误")))
+    }
+
+    // N17：孤儿领养的 pending 落盘失败不阻断领养——内存 pending 继续参与 verify（锁定降级语义）
+    func testAdoptOrphan_saveFailureStillAdopts() async throws {
+        MockURLProtocol.handler = { _ in
+            TestResponses.ok(AppleRestoreData(transactions: [
+                RestoreTransactionData(payNo: "PAY1", status: "success", productId: "shuhu.member.yearly", amount: nil, currency: nil, transactionId: "2000000012345678", paidAt: nil),
+            ], needsManualReview: false))
+        }
+        let failingRecovery = IAPRecovery(
+            client: client,
+            auth: auth,
+            store: PendingPurchaseStore(store: FailingKVStore()),
+        )
+        let transaction = FakeTransaction(id: "2000000012345678", token: token)
+
+        let adopted = try await failingRecovery.adoptOrphan(transaction: transaction, token: token.uuidString)
+
+        XCTAssertEqual(adopted?.payNo, "PAY1", "落盘失败只留痕不阻断：内存 pending 继续参与 verify")
     }
 }

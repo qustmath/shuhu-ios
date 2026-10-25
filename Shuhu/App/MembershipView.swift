@@ -303,6 +303,12 @@ struct MembershipView: View {
         do {
             try await AppStore.sync()
         } catch {
+            // 用户取消登录/验证弹窗不是故障（N16）：明确结束把控制权还给用户——
+            // 既不给「网络异常」误导，也不替已表达取消意图的用户继续跑恢复
+            if IAPRecovery.isUserCancellation(error) {
+                toast.show("已取消恢复")
+                return
+            }
             // sync 失败不阻断本地 token 的台账恢复，但标记可重试（N14——
             // Apple 侧没拉回来时「未找到」是误导）
             retryableFailure = true
