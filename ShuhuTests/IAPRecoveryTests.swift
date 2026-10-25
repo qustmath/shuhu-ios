@@ -1,4 +1,5 @@
 import Combine
+import StoreKit
 import XCTest
 @testable import Shuhu
 
@@ -186,7 +187,7 @@ final class IAPRecoveryTests: XCTestCase {
 
     // N16：sync/restore 的用户取消（登录/验证弹窗点取消）不是网络/服务故障
     func testUserCancellationIsNotServiceFailure() {
-        XCTAssertTrue(IAPRecovery.isUserCancellation(SKError(.paymentCancelled)))
+        XCTAssertTrue(IAPRecovery.isUserCancellation(SKError(SKError.Code.paymentCancelled)))
         XCTAssertFalse(IAPRecovery.isUserCancellation(URLError(.timedOut)))
         XCTAssertFalse(IAPRecovery.isUserCancellation(ApiError(code: 500, "服务器错误")))
     }
