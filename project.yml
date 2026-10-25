@@ -61,8 +61,10 @@ targets:
         SUPPORTS_MACCATALYST: NO
         # 微信 SDK：Vendor 静态库 + 手写 Clang module（Swift 侧 `import WechatOpenSDK` 不变）。
         # 静态库链进主执行文件，不产生任何嵌入 framework。
+        # 库按平台分目录（iphoneos/iphonesimulator）+ $(PLATFORM_NAME) 选择：vendor 的
+        # 真机库没有模拟器 slice，模拟器构建链它直接 ld 报错（CI 2026-10-13 起连红 24 轮才定位）。
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/Vendor/WechatOpenSDK"
-        LIBRARY_SEARCH_PATHS: "$(SRCROOT)/Vendor/WechatOpenSDK"
+        LIBRARY_SEARCH_PATHS: "$(SRCROOT)/Vendor/WechatOpenSDK/$(PLATFORM_NAME)"
         OTHER_LDFLAGS: "$(inherited) -ObjC -lWechatOpenSDK"
       configs:
         # 手动签名仅作用于 App 目标（SPM 依赖 GRDB 不支持描述文件，保持 Automatic）；
