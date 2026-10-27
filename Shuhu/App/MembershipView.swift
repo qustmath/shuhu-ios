@@ -1,6 +1,12 @@
 import StoreKit
 import SwiftUI
 
+/// 上架支付闸门：支付接入并完成联调后改 `enabled = true`。
+enum MembershipPayments {
+    static let enabled = false
+    static let unavailableMessage = "支付功能接入中，暂不可用"
+}
+
 /// 会员购买页（odui membership-v2 纸墨，对齐 Android `MembershipScreen`）：
 /// 页头 + 权益清单 + 套餐单选 + 底部开通条。套餐与价格全部来自后台「营销中心 → 会员套餐」；
 /// 支付为苹果内购（StoreKit 2 先单后买，docs/pay/client-integration.md §2）：
@@ -49,6 +55,13 @@ struct MembershipView: View {
 
     private var selectedPlan: MemberPlanData? {
         plans?.first { $0.id == selectedPlanId }
+    }
+
+    private var bottomHint: String {
+        if purchasing { return "支付处理中…" }
+        return MembershipPayments.enabled
+            ? "开通即视为同意《会员服务协议》· 自动续费可随时取消"
+            : MembershipPayments.unavailableMessage
     }
 
     var body: some View {
@@ -163,7 +176,7 @@ struct MembershipView: View {
                 Task { await purchase() }
             }
             .padding(.top, 12)
-            Text(purchasing ? "支付处理中…" : "开通即视为同意《会员服务协议》· 自动续费可随时取消")
+            Text(bottomHint)
                 .font(.system(size: 12))
                 .foregroundStyle(Paper.inkMuted)
                 .frame(maxWidth: .infinity)
@@ -194,6 +207,10 @@ struct MembershipView: View {
     /// 真实支付购买选中套餐（StoreKit 2 先单后买）：全链路成功刷新登录态快照并跳回；
     /// 失败/取消给出提示。交易在验证成功前保持未完成（失败可重放，契约 §2.1-4）。
     private func purchase() async {
+        guard MembershipPayments.enabled else {
+            toast.show(MembershipPayments.unavailableMessage)
+            return
+        }
         guard let plan = selectedPlan, !purchasing else { return }
         purchasing = true
         defer { purchasing = false }
@@ -294,6 +311,10 @@ struct MembershipView: View {
     /// 购买记录拉回本地（重装后本地 pending 为空的唯一来源，交易经 updates/unfinished
     /// 被恢复编排认领）② 服务端台账恢复（本地留存 token）③ 跑一轮重放认领。
     private func restorePurchases() async {
+        guard MembershipPayments.enabled else {
+            toast.show(MembershipPayments.unavailableMessage)
+            return
+        }
         guard !restoring else { return }
         restoring = true
         defer { restoring = false }
