@@ -69,7 +69,8 @@ public struct WechatUnbindRequest: Encodable, Sendable {
 }
 
 /// 注销账号：二次验证方式与发往绑定手机号的验证码（服务端 MemberDeleteAccountRequest）。
-public struct DeleteAccountRequest: Encodable, Sendable {
+/// Codable 而非 Encodable：单测需要回读请求体断言验证码。
+public struct DeleteAccountRequest: Codable, Sendable {
     public let method: String
     public let code: String
 }
