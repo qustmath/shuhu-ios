@@ -88,15 +88,6 @@ public final class ApiClient: @unchecked Sendable {
         return try decode(data)
     }
 
-    /// 无请求体的 DELETE（注销账号等）。语义与 get/post 一致：统一信封 + Bearer + 401 续期一次。
-    public func delete<T: Decodable>(
-        _ path: String,
-        timeout: TimeInterval? = nil,
-    ) async throws -> Envelope<T> {
-        let (data, _) = try await send(path: path, method: "DELETE", query: [], body: nil, contentType: nil, timeout: timeout)
-        return try decode(data)
-    }
-
     /// multipart 上传（封面）：单文件字段上传，返回服务端引用路径等业务数据。
     public func uploadMultipart<T: Decodable>(
         _ path: String,

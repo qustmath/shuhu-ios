@@ -38,8 +38,11 @@ struct ProfileView: View {
     @State private var totalPagesRead: Int64 = 0
     @State private var loadError: String?
 
-    /// 注销账号：二次确认弹窗、请求进行中、失败提示（App Store 5.1.1(v)）
-    @State private var confirmDeleteAccount = false
+    /// 注销账号：短信二次验证弹层（App Store 5.1.1(v) + 防设备丢失误注销）
+    @State private var showDeleteSheet = false
+    @State private var deleteCode = ""
+    @State private var deleteCodeSending = false
+    @State private var deleteCodeCountdown = 0
     @State private var deletingAccount = false
     @State private var deleteAccountError: String?
 
@@ -201,28 +204,24 @@ struct ProfileView: View {
                     // ── 注销账号（仅登录后；App Store 5.1.1(v) 要求账号可自助注销）──
                     if member != nil {
                         Button {
-                            confirmDeleteAccount = true
+                            deleteCode = ""
+                            deleteCodeCountdown = 0
+                            showDeleteSheet = true
                         } label: {
                             HStack {
                                 Text("注销账号")
                                     .font(.system(size: 15))
                                     .foregroundStyle(Paper.ochre)
                                 Spacer()
-                                if deletingAccount {
-                                    ProgressView()
-                                        .scaleEffect(0.7)
-                                } else {
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(Paper.ochre.opacity(0.6))
-                                }
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(Paper.ochre.opacity(0.6))
                             }
                             .padding(.horizontal, 22)
                             .padding(.vertical, 15)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .disabled(deletingAccount)
                         HairlineRule()
                     }
 
@@ -330,12 +329,6 @@ struct ProfileView: View {
         } message: {
             Text(loadError ?? "")
         }
-        .alert("注销账号", isPresented: $confirmDeleteAccount) {
-            Button("确认注销", role: .destructive) { deleteAccount() }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("注销后云端账号立即删除：同步数据、封面与头像一并清除，手机号可重新注册，且无法恢复。本机上的书籍与记录会保留。")
-        }
         .alert(
             "注销失败",
             isPresented: .init(get: { deleteAccountError != nil }, set: { if !$0 { deleteAccountError = nil } }),
@@ -344,6 +337,64 @@ struct ProfileView: View {
         } message: {
             Text(deleteAccountError ?? "")
         }
+        .sheet(isPresented: $showDeleteSheet) {
+            deleteAccountSheet
+        }
+    }
+
+    /// 注销账号弹层：短信验证码二次确认（服务端只把码发往绑定手机号）。
+    private var deleteAccountSheet: some View {
+        VStack(spacing: 0) {
+            PaperTopBar(title: "注销账号", onBack: { showDeleteSheet = false })
+            PaperPageHead(
+                kicker: "DELETE ACCOUNT",
+                title: "注销账号",
+                sub: "先验证绑定手机号，再删除云端账号。",
+            )
+
+            HStack {
+                Text("手机号")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Paper.inkMuted)
+                Spacer()
+                Text(member?.maskedPhone ?? "")
+                    .font(.paperMono(16))
+                    .foregroundStyle(Paper.ink)
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 15)
+
+            SmsCodeRow(
+                code: $deleteCode,
+                countdown: deleteCodeCountdown,
+                sending: deleteCodeSending,
+                submitLoading: deletingAccount,
+                onSend: { Task { await sendDeleteCode() } },
+            )
+
+            Text("注销后云端同步数据、封面与头像立即删除，手机号可重新注册，且无法恢复；本机上的书籍与记录会保留。")
+                .font(.system(size: 12))
+                .foregroundStyle(Paper.inkMuted)
+                .lineSpacing(4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 10)
+
+            Spacer()
+
+            HairlineRule()
+            PaperPrimaryButton(
+                text: deletingAccount ? "注销中…" : "确认注销",
+                isEnabled: !deletingAccount,
+            ) {
+                deleteAccount()
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 12)
+        }
+        .background(Paper.bg.ignoresSafeArea())
+        // sheet 层级高于根视图挂载的 ToastOverlay，页内提示需自挂一份
+        .overlay { ToastOverlay(center: toast) }
     }
 
     // ---- 账号区 ----
@@ -662,15 +713,45 @@ struct ProfileView: View {
         }
     }
 
-    /// 注销账号：服务端删除成功即清空本地登录态（session 变 nil，页面回到未登录）；
+    /// 发送注销验证码：服务端场景 delete_account，只发往绑定手机号（传当前号仅为契约字段）。
+    private func sendDeleteCode() async {
+        guard let phone = member?.phone, !phone.isEmpty else {
+            toast.show("账号未绑定手机号，暂不能注销")
+            return
+        }
+        deleteCodeSending = true
+        do {
+            try await auth.sendBindPhoneCode(phone: phone, scene: Sms.sceneDeleteAccount, method: Sms.methodSms)
+            deleteCodeSending = false
+            toast.show("验证码已发送")
+            deleteCodeCountdown = 60
+            Task {
+                while deleteCodeCountdown > 0 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    deleteCodeCountdown -= 1
+                }
+            }
+        } catch {
+            deleteCodeSending = false
+            toast.show(error.localizedDescription)
+        }
+    }
+
+    /// 注销账号：验证码通过、服务端删除成功后才清本地登录态（session 变 nil）；
     /// 本地书籍与记录属于用户设备上的数据，不随账号注销删除。
     private func deleteAccount() {
+        let code = deleteCode.trimmingCharacters(in: .whitespaces)
+        guard !code.isEmpty else {
+            toast.show("请输入验证码")
+            return
+        }
         guard !deletingAccount else { return }
         deletingAccount = true
         Task {
             do {
-                try await auth.deleteAccount()
+                try await auth.deleteAccount(code: code, method: Sms.methodSms)
                 deletingAccount = false
+                showDeleteSheet = false
                 toast.show("账号已注销")
             } catch {
                 deletingAccount = false

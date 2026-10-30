@@ -166,16 +166,42 @@ final class RemoteAuthRepositoryTests: XCTestCase {
         _ = try await auth.login(phone: "13800000001", password: "secret")
 
         MockURLProtocol.handler = { request in
-            XCTAssertEqual(request.url?.path, "/api/v1/member/me")
-            XCTAssertEqual(request.httpMethod, "DELETE")
+            XCTAssertEqual(request.url?.path, "/api/v1/member/delete-account")
+            XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer acc-1")
+            // 验证码随请求体提交，服务端按 delete_account 场景校验
+            let body = try JSONDecoder().decode(DeleteAccountRequest.self, from: request.bodyData ?? Data())
+            XCTAssertEqual(body.method, "sms")
+            XCTAssertEqual(body.code, "654321")
             return TestResponses.okEmpty()
         }
-        try await auth.deleteAccount()
+        try await auth.deleteAccount(code: "654321", method: "sms")
 
         XCTAssertNil(auth.session.value, "注销后回到未登录")
         XCTAssertNil(auth.currentAccessToken())
         XCTAssertNil(tokenStore.tokens(), "本地令牌一并清空")
+    }
+
+    func testDeleteAccount_wrongCodeKeepsSession() async throws {
+        MockURLProtocol.handler = { _ in
+            TestResponses.ok(self.loginData(access: "acc-1", refresh: "ref-1"))
+        }
+        _ = try await auth.login(phone: "13800000001", password: "secret")
+
+        MockURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/member/delete-account")
+            return TestResponses.businessError(code: 400, message: "验证码错误或已过期")
+        }
+
+        do {
+            try await auth.deleteAccount(code: "000000", method: "sms")
+            XCTFail("验证码错误必须抛出")
+        } catch {
+            XCTAssertEqual((error as? ApiError)?.message, "验证码错误或已过期")
+        }
+        // 账号仍在：验证码失败不能清本地登录态
+        XCTAssertEqual(auth.session.value?.id, 5)
+        XCTAssertEqual(auth.currentAccessToken(), "acc-1")
     }
 
     func testDeleteAccount_failureKeepsSession() async throws {
@@ -185,12 +211,12 @@ final class RemoteAuthRepositoryTests: XCTestCase {
         _ = try await auth.login(phone: "13800000001", password: "secret")
 
         MockURLProtocol.handler = { request in
-            XCTAssertEqual(request.url?.path, "/api/v1/member/me")
+            XCTAssertEqual(request.url?.path, "/api/v1/member/delete-account")
             return TestResponses.businessError(code: 500, message: "服务器错误")
         }
 
         do {
-            try await auth.deleteAccount()
+            try await auth.deleteAccount(code: "654321", method: "sms")
             XCTFail("服务端失败必须抛出")
         } catch {
             XCTAssertEqual((error as? ApiError)?.message, "服务器错误")

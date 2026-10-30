@@ -68,6 +68,12 @@ public struct WechatUnbindRequest: Encodable, Sendable {
     public let identityId: Int64
 }
 
+/// 注销账号：二次验证方式与发往绑定手机号的验证码（服务端 MemberDeleteAccountRequest）。
+public struct DeleteAccountRequest: Encodable, Sendable {
+    public let method: String
+    public let code: String
+}
+
 /// 微信注册会员首次设置密码（服务端 MemberSetPasswordRequest）。
 public struct SetPasswordRequest: Encodable, Sendable {
     public let newPassword: String
@@ -245,10 +251,13 @@ public final class RemoteAuthRepository: AuthRepository, @unchecked Sendable {
 
     // ---- 已登录端点 ----
 
-    /// 注销账号：服务端删除成功后才清本地登录态；失败（含网络中断）保留登录态，
-    /// 账号仍存在，用户可重试——绝不能本地先清会话让用户以为已注销。
-    public func deleteAccount() async throws {
-        let envelope: Envelope<EmptyData> = try await memberClient.delete("api/v1/member/me")
+    /// 注销账号：先校验绑定手机号验证码（场景 delete_account），成功后才清本地登录态；
+    /// 失败（验证码错误/网络中断）保留登录态，账号仍存在，用户可重试。
+    public func deleteAccount(code: String, method: String) async throws {
+        let envelope: Envelope<EmptyData> = try await memberClient.post(
+            "api/v1/member/delete-account",
+            body: DeleteAccountRequest(method: method, code: code),
+        )
         try envelope.requireOk()
         tokenStore.clear()
         lock.lock()

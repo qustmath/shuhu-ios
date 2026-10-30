@@ -140,6 +140,8 @@ public enum Sms {
     public static let sceneBindPhone = "bind_phone"
     /// 换绑：服务端按请求号推导发旧号/新号。
     public static let sceneRebindPhone = "rebind_phone"
+    /// 注销账号的二次验证码：服务端只发往当前绑定手机号（忽略客户端传的号码）。
+    public static let sceneDeleteAccount = "delete_account"
     public static let methodSms = "sms"
     public static let methodDev = "dev" // 开发联调：服务端固定码，仅 debug 构建暴露入口
 }
@@ -190,9 +192,10 @@ public protocol AuthRepository: AnyObject {
     /// 登出：撤销服务端会话并清空本地登录态；本地数据不受影响。
     func logout() async
 
-    /// 注销账号（不可恢复）：服务端清除云端个人数据后清空本地登录态；
-    /// 失败时登录态保持不变（账号仍在）。本地书籍与记录不随注销删除。
-    func deleteAccount() async throws
+    /// 注销账号（不可恢复）：先校验发往绑定手机号的 delete_account 验证码，
+    /// 服务端清除云端个人数据后清空本地登录态；失败时登录态保持不变（账号仍在）。
+    /// 本地书籍与记录不随注销删除。
+    func deleteAccount(code: String, method: String) async throws
 
     /// 拉取最新会员资料并刷新登录态快照（进入「我」页时调用）。
     func refreshProfile() async throws -> AuthMember
