@@ -38,6 +38,11 @@ struct ProfileView: View {
     @State private var totalPagesRead: Int64 = 0
     @State private var loadError: String?
 
+    /// 注销账号：二次确认弹窗、请求进行中、失败提示（App Store 5.1.1(v)）
+    @State private var confirmDeleteAccount = false
+    @State private var deletingAccount = false
+    @State private var deleteAccountError: String?
+
     init(
         repository: any LibraryRepository,
         auth: any AuthRepository,
@@ -88,11 +93,13 @@ struct ProfileView: View {
                         setPasswordRow
                     }
 
-                    // ── 微信绑定 ──
-                    wechatRow
+                    // ── 微信绑定（送审期隐藏，见 StoreGates）──
+                    if StoreGates.wechatLoginVisible {
+                        wechatRow
+                    }
 
-                    // ── 会员（仅登录后）──
-                    if member != nil {
+                    // ── 会员（仅登录后；送审期隐藏，见 StoreGates）──
+                    if member != nil, StoreGates.membershipVisible {
                         HairlineRule()
                         Button(action: onOpenMembership) {
                             SettingsRow(
@@ -190,6 +197,34 @@ struct ProfileView: View {
                     }
                     .buttonStyle(.plain)
                     HairlineRule()
+
+                    // ── 注销账号（仅登录后；App Store 5.1.1(v) 要求账号可自助注销）──
+                    if member != nil {
+                        Button {
+                            confirmDeleteAccount = true
+                        } label: {
+                            HStack {
+                                Text("注销账号")
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(Paper.ochre)
+                                Spacer()
+                                if deletingAccount {
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                } else {
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(Paper.ochre.opacity(0.6))
+                                }
+                            }
+                            .padding(.horizontal, 22)
+                            .padding(.vertical, 15)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(deletingAccount)
+                        HairlineRule()
+                    }
 
                     Text("未登录时，所有数据仅保存在这台设备上")
                         .font(.paperMono(11))
@@ -294,6 +329,20 @@ struct ProfileView: View {
             Button("好", role: .cancel) {}
         } message: {
             Text(loadError ?? "")
+        }
+        .alert("注销账号", isPresented: $confirmDeleteAccount) {
+            Button("确认注销", role: .destructive) { deleteAccount() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("注销后云端账号立即删除：同步数据、封面与头像一并清除，手机号可重新注册，且无法恢复。本机上的书籍与记录会保留。")
+        }
+        .alert(
+            "注销失败",
+            isPresented: .init(get: { deleteAccountError != nil }, set: { if !$0 { deleteAccountError = nil } }),
+        ) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(deleteAccountError ?? "")
         }
     }
 
@@ -609,6 +658,23 @@ struct ProfileView: View {
                 toast.show("头像已更新")
             } catch {
                 toast.show(error.localizedDescription)
+            }
+        }
+    }
+
+    /// 注销账号：服务端删除成功即清空本地登录态（session 变 nil，页面回到未登录）；
+    /// 本地书籍与记录属于用户设备上的数据，不随账号注销删除。
+    private func deleteAccount() {
+        guard !deletingAccount else { return }
+        deletingAccount = true
+        Task {
+            do {
+                try await auth.deleteAccount()
+                deletingAccount = false
+                toast.show("账号已注销")
+            } catch {
+                deletingAccount = false
+                deleteAccountError = (error as? ApiError)?.message ?? "注销失败，请稍后再试"
             }
         }
     }

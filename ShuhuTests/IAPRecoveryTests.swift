@@ -33,6 +33,7 @@ final class IAPRecoveryTests: XCTestCase {
         func unbindWechat(identityId: Int64) async throws -> AuthMember { fatalError("unused") }
         func setPassword(_ newPassword: String) async throws -> AuthMember { fatalError("unused") }
         func logout() async { fatalError("unused") }
+        func deleteAccount() async throws { fatalError("unused") }
         func updateNickname(_ nickname: String) async throws -> AuthMember { fatalError("unused") }
         func updateAvatar(imageBytes: Data, ext: String) async throws -> AuthMember { fatalError("unused") }
     }

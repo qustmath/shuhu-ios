@@ -245,6 +245,18 @@ public final class RemoteAuthRepository: AuthRepository, @unchecked Sendable {
 
     // ---- 已登录端点 ----
 
+    /// 注销账号：服务端删除成功后才清本地登录态；失败（含网络中断）保留登录态，
+    /// 账号仍存在，用户可重试——绝不能本地先清会话让用户以为已注销。
+    public func deleteAccount() async throws {
+        let envelope: Envelope<EmptyData> = try await memberClient.delete("api/v1/member/me")
+        try envelope.requireOk()
+        tokenStore.clear()
+        lock.lock()
+        accessToken = nil
+        lock.unlock()
+        session.send(nil)
+    }
+
     public func sendBindPhoneCode(phone: String, scene: String, method: String) async throws {
         let envelope: Envelope<EmptyData> = try await memberClient.post(
             "api/v1/member/phone/code",

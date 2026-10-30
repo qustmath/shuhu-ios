@@ -190,6 +190,10 @@ public protocol AuthRepository: AnyObject {
     /// 登出：撤销服务端会话并清空本地登录态；本地数据不受影响。
     func logout() async
 
+    /// 注销账号（不可恢复）：服务端清除云端个人数据后清空本地登录态；
+    /// 失败时登录态保持不变（账号仍在）。本地书籍与记录不随注销删除。
+    func deleteAccount() async throws
+
     /// 拉取最新会员资料并刷新登录态快照（进入「我」页时调用）。
     func refreshProfile() async throws -> AuthMember
 

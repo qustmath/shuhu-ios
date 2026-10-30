@@ -150,8 +150,8 @@ struct LoginView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    // ── 微信登录（对齐 Android：官方图形 + 协议未勾选先提示）──
-                    if wechat.canLogin {
+                    // ── 微信登录（送审期隐藏：4.8 需配套 Sign in with Apple，见 StoreGates）──
+                    if wechat.canLogin, StoreGates.wechatLoginVisible {
                         HairlineRule()
                         VStack(spacing: 0) {
                             Button {

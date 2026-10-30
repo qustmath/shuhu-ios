@@ -157,6 +157,49 @@ final class RemoteAuthRepositoryTests: XCTestCase {
         XCTAssertNil(tokenStore.tokens())
     }
 
+    // ---- 注销账号 ----
+
+    func testDeleteAccount_clearsSessionOnlyAfterServerDeletes() async throws {
+        MockURLProtocol.handler = { _ in
+            TestResponses.ok(self.loginData(access: "acc-1", refresh: "ref-1"))
+        }
+        _ = try await auth.login(phone: "13800000001", password: "secret")
+
+        MockURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/member/me")
+            XCTAssertEqual(request.httpMethod, "DELETE")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer acc-1")
+            return TestResponses.okEmpty()
+        }
+        try await auth.deleteAccount()
+
+        XCTAssertNil(auth.session.value, "注销后回到未登录")
+        XCTAssertNil(auth.currentAccessToken())
+        XCTAssertNil(tokenStore.tokens(), "本地令牌一并清空")
+    }
+
+    func testDeleteAccount_failureKeepsSession() async throws {
+        MockURLProtocol.handler = { _ in
+            TestResponses.ok(self.loginData(access: "acc-1", refresh: "ref-1"))
+        }
+        _ = try await auth.login(phone: "13800000001", password: "secret")
+
+        MockURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/member/me")
+            return TestResponses.businessError(code: 500, message: "服务器错误")
+        }
+
+        do {
+            try await auth.deleteAccount()
+            XCTFail("服务端失败必须抛出")
+        } catch {
+            XCTAssertEqual((error as? ApiError)?.message, "服务器错误")
+        }
+        // 账号仍在：本地登录态不能被提前清掉，否则用户以为已注销
+        XCTAssertEqual(auth.session.value?.id, 5)
+        XCTAssertEqual(auth.currentAccessToken(), "acc-1")
+    }
+
     // ---- 重置密码（不自动登录）----
 
     func testResetPassword_doesNotEnterSession() async throws {

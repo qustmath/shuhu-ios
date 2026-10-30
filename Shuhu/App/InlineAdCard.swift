@@ -27,8 +27,8 @@ struct InlineAdCard: View {
                 .contentShape(Rectangle())
                 .onTapGesture { handleTap() }
 
-            // 左下「开通会员，免广告」入口：灰色半透明小标
-            if let onOpenMembership {
+            // 左下「开通会员，免广告」入口：灰色半透明小标（送审期隐藏，见 StoreGates）
+            if StoreGates.membershipVisible, let onOpenMembership {
                 Button {
                     menuOpen = false
                     onOpenMembership()
@@ -122,6 +122,11 @@ struct InlineAdCard: View {
                 UIApplication.shared.open(target)
             }
         case .internalRoute(let route):
+            // 会员入口关闭时落地页不可达：按不可点素材处理（不跳转、不计点击），
+            // 免得运营后台配了 membership.purchase 素材就绕过入口隐藏
+            if route == "membership.purchase", !StoreGates.membershipVisible {
+                return
+            }
             adsClient.reportClicks(slot: slot, ids: [creative.id])
             // 会员购买页：走调用方注入的导航（详情页广告/会员入口共用）
             if route == "membership.purchase" {
